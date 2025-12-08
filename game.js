@@ -11,7 +11,24 @@ const gameData = {
             accessories: [],
             completedAchievements: [],
             defeatedBosses: [],
-            unlockedLocations: ['forest']
+            unlockedLocations: ['forest'],
+            // Боевые статы
+            stats: {
+                attack: 25,
+                defense: 10,
+                health: 100,
+                maxHealth: 100,
+                crit: 5 // шанс крита в %
+            },
+            equipment: {
+                weapon: null,
+                helmet: null,
+                armor: null,
+                boots: null,
+                accessory: null
+            },
+            inventory: [],
+            currentEnemy: null
         },
         yulya: {
             name: 'ЮЛЯ',
@@ -23,7 +40,24 @@ const gameData = {
             accessories: [],
             completedAchievements: [],
             defeatedBosses: [],
-            unlockedLocations: ['forest']
+            unlockedLocations: ['forest'],
+            // Боевые статы
+            stats: {
+                attack: 25,
+                defense: 10,
+                health: 100,
+                maxHealth: 100,
+                crit: 5
+            },
+            equipment: {
+                weapon: null,
+                helmet: null,
+                armor: null,
+                boots: null,
+                accessory: null
+            },
+            inventory: [],
+            currentEnemy: null
         }
     },
     currentPlayer: 'kirill',
@@ -47,24 +81,30 @@ const gameData = {
     ],
     
     shopItems: {
+        chests: [
+            { id: 'common_chest', name: 'Обычный сундук', desc: 'Случайная обычная экипировка', price: 50, type: 'chest', rarity: 'common' },
+            { id: 'rare_chest', name: 'Редкий сундук', desc: 'Случайная редкая экипировка', price: 150, type: 'chest', rarity: 'rare' },
+            { id: 'epic_chest', name: 'Эпический сундук', desc: 'Случайная эпическая экипировка', price: 300, type: 'chest', rarity: 'epic' },
+            { id: 'legendary_chest', name: 'Легендарный сундук', desc: 'Случайная легендарная экипировка', price: 500, type: 'chest', rarity: 'legendary' }
+        ],
         upgrades: [
             { id: 'xp_boost', name: 'Усилитель опыта', desc: '+20% опыта за достижения', price: 100, type: 'upgrade' },
-            { id: 'coin_boost', name: 'Усилитель монет', desc: '+30% монет за уровень', price: 150, type: 'upgrade' },
-            { id: 'double_xp', name: 'Двойной опыт', desc: 'Двойной опыт на 24 часа', price: 200, type: 'consumable' }
+            { id: 'coin_boost', name: 'Усилитель монет', desc: '+30% монет за уровень', price: 150, type: 'upgrade' }
         ],
         items: [
-            { id: 'health_potion', name: 'Зелье здоровья', desc: 'Восстанавливает здоровье в битве', price: 50, type: 'item' },
-            { id: 'strength_potion', name: 'Зелье силы', desc: '+10 к силе в битве', price: 75, type: 'item' },
-            { id: 'defense_shield', name: 'Щит защиты', desc: '+15 к защите в битве', price: 120, type: 'item' },
-            { id: 'lucky_charm', name: 'Талисман удачи', desc: '+5% к шансу критического удара', price: 200, type: 'item' }
-        ],
-        cosmetics: [
-            { id: 'hat_crown', name: 'Корона', desc: 'Золотая корона', price: 300, type: 'cosmetic' },
-            { id: 'hat_cap', name: 'Кепка', desc: 'Стильная кепка', price: 150, type: 'cosmetic' },
-            { id: 'glasses', name: 'Очки', desc: 'Крутые очки', price: 100, type: 'cosmetic' },
-            { id: 'cape', name: 'Плащ', desc: 'Геройский плащ', price: 250, type: 'cosmetic' }
+            { id: 'health_potion', name: 'Зелье здоровья', desc: 'Восстанавливает 50 HP', price: 50, type: 'item' },
+            { id: 'strength_potion', name: 'Зелье силы', desc: '+10 к атаке на 1 час', price: 75, type: 'item' }
         ]
     },
+    
+    enemies: [
+        { id: 'lazy_enemy', name: 'Лень', level: 1, sprite: '😴', hp: 100, maxHp: 100, reward: { coins: 10, xp: 20 } },
+        { id: 'procrastination_enemy', name: 'Прокрастинация', level: 3, sprite: '⏰', hp: 200, maxHp: 200, reward: { coins: 25, xp: 50 } },
+        { id: 'doubt_enemy', name: 'Сомнения', level: 5, sprite: '🤔', hp: 350, maxHp: 350, reward: { coins: 50, xp: 100 } },
+        { id: 'fear_enemy', name: 'Страх', level: 8, sprite: '👻', hp: 500, maxHp: 500, reward: { coins: 100, xp: 200 } },
+        { id: 'apathy_enemy', name: 'Апатия', level: 12, sprite: '😑', hp: 800, maxHp: 800, reward: { coins: 150, xp: 300 } },
+        { id: 'final_boss', name: 'Финальный Босс', level: 20, sprite: '👹', hp: 2000, maxHp: 2000, reward: { coins: 500, xp: 1000 } }
+    ],
     
     bosses: [
         { id: 'lazy_boss', name: 'Босс Лени', level: 5, sprite: '😴', reward: 100 },
@@ -72,6 +112,44 @@ const gameData = {
         { id: 'doubt_boss', name: 'Босс Сомнений', level: 15, sprite: '🤔', reward: 300 },
         { id: 'fear_boss', name: 'Босс Страха', level: 20, sprite: '👻', reward: 500 },
         { id: 'final_boss', name: 'Финальный Босс', level: 30, sprite: '👹', reward: 1000 }
+    ],
+    
+    // Типы экипировки
+    equipmentTypes: {
+        weapon: { name: 'Оружие', stat: 'attack', icon: '🔫' },
+        helmet: { name: 'Шлем', stat: 'defense', icon: '🪖' },
+        armor: { name: 'Броня', stat: 'defense', icon: '🛡️' },
+        boots: { name: 'Ботинки', stat: 'defense', icon: '👢' },
+        accessory: { name: 'Аксессуар', stat: 'crit', icon: '💍' }
+    },
+    
+    // Шаблоны экипировки для сундуков
+    equipmentTemplates: [
+        // Оружие
+        { type: 'weapon', name: 'Пистолет', rarity: 'common', attack: 5, icon: '🔫' },
+        { type: 'weapon', name: 'Автомат', rarity: 'rare', attack: 12, icon: '🔫' },
+        { type: 'weapon', name: 'Снайперка', rarity: 'epic', attack: 20, icon: '🔫' },
+        { type: 'weapon', name: 'Легендарное оружие', rarity: 'legendary', attack: 35, icon: '🔫' },
+        // Шлемы
+        { type: 'helmet', name: 'Каска', rarity: 'common', defense: 3, icon: '🪖' },
+        { type: 'helmet', name: 'Боевой шлем', rarity: 'rare', defense: 7, icon: '🪖' },
+        { type: 'helmet', name: 'Элитный шлем', rarity: 'epic', defense: 12, icon: '🪖' },
+        { type: 'helmet', name: 'Легендарный шлем', rarity: 'legendary', defense: 20, icon: '🪖' },
+        // Броня
+        { type: 'armor', name: 'Жилет', rarity: 'common', defense: 5, icon: '🛡️' },
+        { type: 'armor', name: 'Бронежилет', rarity: 'rare', defense: 10, icon: '🛡️' },
+        { type: 'armor', name: 'Тяжелая броня', rarity: 'epic', defense: 18, icon: '🛡️' },
+        { type: 'armor', name: 'Легендарная броня', rarity: 'legendary', defense: 30, icon: '🛡️' },
+        // Ботинки
+        { type: 'boots', name: 'Кроссовки', rarity: 'common', defense: 2, icon: '👢' },
+        { type: 'boots', name: 'Ботинки', rarity: 'rare', defense: 5, icon: '👢' },
+        { type: 'boots', name: 'Боевые ботинки', rarity: 'epic', defense: 8, icon: '👢' },
+        { type: 'boots', name: 'Легендарные ботинки', rarity: 'legendary', defense: 15, icon: '👢' },
+        // Аксессуары
+        { type: 'accessory', name: 'Кольцо', rarity: 'common', crit: 2, icon: '💍' },
+        { type: 'accessory', name: 'Амулет', rarity: 'rare', crit: 5, icon: '💍' },
+        { type: 'accessory', name: 'Талисман', rarity: 'epic', crit: 10, icon: '💍' },
+        { type: 'accessory', name: 'Легендарный артефакт', rarity: 'legendary', crit: 20, icon: '💍' }
     ],
     
     locations: [
@@ -100,11 +178,19 @@ function initGame() {
     
     loadGameData();
     setupEventListeners();
+    
+    // Инициализация боя
+    const player = getCurrentPlayer();
+    if (!player.currentEnemy) {
+        startCombat();
+    }
+    
+    renderCombat();
     renderAchievements();
     renderCharacter();
+    renderEquipment();
     renderShop();
     renderBosses();
-    renderLocations();
     updatePlayerStats();
 }
 
@@ -115,6 +201,22 @@ function loadGameData() {
         const parsed = JSON.parse(saved);
         Object.assign(gameData.players, parsed.players || {});
         gameData.currentPlayer = parsed.currentPlayer || 'kirill';
+        
+        // Миграция старых данных: добавляем timestamp к старым достижениям
+        Object.values(gameData.players).forEach(player => {
+            if (player.completedAchievements) {
+                player.completedAchievements = player.completedAchievements.map(ca => {
+                    if (!ca.timestamp && ca.date) {
+                        // Если нет timestamp, создаем его из даты (устанавливаем на начало дня)
+                        const date = new Date(ca.date);
+                        date.setHours(0, 0, 0, 0);
+                        ca.timestamp = date.toISOString();
+                    }
+                    return ca;
+                });
+            }
+        });
+        saveGameData(); // Сохраняем мигрированные данные
     }
 }
 
@@ -165,6 +267,9 @@ function setupEventListeners() {
         });
     });
     
+    // Инициализация первой вкладки (Бой)
+    switchTab('combat');
+    
     // Модальное окно
     const modal = document.getElementById('achievementModal');
     const closeBtn = document.querySelector('.close');
@@ -198,6 +303,12 @@ function switchTab(tabName) {
     document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
     document.getElementById(`tab-${tabName}`).classList.add('active');
     document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+    
+    // Если переключились на вкладку достижений, обновляем таймеры
+    if (tabName === 'achievements') {
+        const activeFilter = document.querySelector('.filter-btn.active')?.dataset.filter || 'all';
+        renderAchievements(activeFilter);
+    }
 }
 
 // Обновление статистики игрока
@@ -265,6 +376,50 @@ function showLevelUpAnimation(coins) {
     }, 3000);
 }
 
+// Проверка доступности достижения (прошло ли 24 часа)
+function isAchievementAvailable(achievementId) {
+    const player = getCurrentPlayer();
+    const lastCompletion = player.completedAchievements.find(ca => ca.id === achievementId);
+    
+    if (!lastCompletion || !lastCompletion.timestamp) {
+        return true; // Никогда не выполнялось
+    }
+    
+    const lastTime = new Date(lastCompletion.timestamp).getTime();
+    const now = new Date().getTime();
+    const hoursPassed = (now - lastTime) / (1000 * 60 * 60);
+    
+    return hoursPassed >= 24;
+}
+
+// Получение времени до следующего доступного выполнения
+function getTimeUntilAvailable(achievementId) {
+    const player = getCurrentPlayer();
+    const lastCompletion = player.completedAchievements.find(ca => ca.id === achievementId);
+    
+    if (!lastCompletion || !lastCompletion.timestamp) {
+        return null; // Доступно сейчас
+    }
+    
+    const lastTime = new Date(lastCompletion.timestamp).getTime();
+    const now = new Date().getTime();
+    const hoursPassed = (now - lastTime) / (1000 * 60 * 60);
+    
+    if (hoursPassed >= 24) {
+        return null; // Доступно сейчас
+    }
+    
+    const hoursLeft = 24 - hoursPassed;
+    const hours = Math.floor(hoursLeft);
+    const minutes = Math.floor((hoursLeft - hours) * 60);
+    
+    if (hours > 0) {
+        return `${hours}ч ${minutes}м`;
+    } else {
+        return `${minutes}м`;
+    }
+}
+
 // Рендеринг достижений
 function renderAchievements(filter = 'all') {
     const container = document.getElementById('achievementsList');
@@ -277,13 +432,12 @@ function renderAchievements(filter = 'all') {
     }
     
     filteredAchievements.forEach(achievement => {
-        const isCompleted = player.completedAchievements.some(ca => ca.id === achievement.id);
-        const card = document.createElement('div');
-        card.className = `achievement-card ${isCompleted ? 'completed' : ''}`;
+        const lastCompletion = player.completedAchievements.find(ca => ca.id === achievement.id);
+        const isAvailable = isAchievementAvailable(achievement.id);
+        const timeLeft = getTimeUntilAvailable(achievement.id);
         
-        const completedInfo = isCompleted 
-            ? player.completedAchievements.find(ca => ca.id === achievement.id)
-            : null;
+        const card = document.createElement('div');
+        card.className = `achievement-card ${lastCompletion && !isAvailable ? 'completed' : ''} ${isAvailable ? 'available' : 'cooldown'}`;
         
         card.innerHTML = `
             <div class="achievement-info">
@@ -294,16 +448,31 @@ function renderAchievements(filter = 'all') {
                         ${achievement.difficulty === 'easy' ? 'Легко' : achievement.difficulty === 'medium' ? 'Средне' : 'Сложно'}
                     </span>
                     <span class="achievement-points">+${achievement.points} очков</span>
-                    ${completedInfo ? `<span>✅ Выполнено: ${new Date(completedInfo.date).toLocaleDateString('ru-RU')}</span>` : ''}
+                    ${lastCompletion ? `<span>✅ Выполнено: ${new Date(lastCompletion.date).toLocaleDateString('ru-RU')}</span>` : ''}
+                    ${!isAvailable && timeLeft ? `<span class="cooldown-timer">⏰ Доступно через: ${timeLeft}</span>` : ''}
                 </div>
             </div>
             <div class="achievement-actions">
-                ${!isCompleted ? `<button class="btn-primary" onclick="openAchievementModal('${achievement.id}')">Отметить</button>` : ''}
+                ${isAvailable ? `<button class="btn-primary" onclick="openAchievementModal('${achievement.id}')">Отметить</button>` : 
+                  `<button class="btn-primary" disabled>⏳ Ожидание (${timeLeft})</button>`}
             </div>
         `;
         
         container.appendChild(card);
     });
+    
+    // Автоматическое обновление каждые 30 секунд для обновления таймеров
+    if (window.achievementUpdateInterval) {
+        clearInterval(window.achievementUpdateInterval);
+    }
+    window.achievementUpdateInterval = setInterval(() => {
+        // Обновляем только если вкладка достижений активна
+        const achievementsTab = document.getElementById('tab-achievements');
+        if (achievementsTab && achievementsTab.classList.contains('active')) {
+            const activeFilter = document.querySelector('.filter-btn.active')?.dataset.filter || 'all';
+            renderAchievements(activeFilter);
+        }
+    }, 30000); // Обновление каждые 30 секунд
 }
 
 // Открытие модального окна для отметки достижения
@@ -317,6 +486,153 @@ function openAchievementModal(achievementId) {
     modal.dataset.achievementId = achievementId;
     
     modal.classList.add('active');
+}
+
+// Расчет урона за достижение
+function calculateAchievementDamage(achievement, player) {
+    const baseDamage = achievement.points * 2; // Базовый урон = очки * 2
+    const attackBonus = player.stats.attack;
+    const totalDamage = baseDamage + attackBonus;
+    
+    // Проверка крита
+    const isCrit = Math.random() * 100 < player.stats.crit;
+    const finalDamage = isCrit ? Math.floor(totalDamage * 1.5) : totalDamage;
+    
+    return { damage: finalDamage, isCrit };
+}
+
+// Нанесение урона текущему врагу
+function dealDamageToEnemy(damage, isCrit) {
+    const player = getCurrentPlayer();
+    if (!player.currentEnemy) {
+        // Если нет текущего врага, создаем нового
+        startCombat();
+        return;
+    }
+    
+    const enemy = gameData.enemies.find(e => e.id === player.currentEnemy);
+    if (!enemy) {
+        startCombat();
+        return;
+    }
+    
+    enemy.hp = Math.max(0, enemy.hp - damage);
+    
+    // Визуализация урона
+    showDamageIndicator(damage, isCrit);
+    
+    // Обновление HP бара врага
+    updateEnemyHealthBar();
+    
+    // Проверка победы
+    if (enemy.hp <= 0) {
+        defeatEnemy(enemy);
+    }
+    
+    saveGameData();
+}
+
+// Визуализация урона
+function showDamageIndicator(damage, isCrit) {
+    const enemySprite = document.getElementById('enemySprite');
+    if (!enemySprite) return;
+    
+    const damageText = document.createElement('div');
+    damageText.className = 'damage-indicator';
+    damageText.textContent = `-${damage}`;
+    if (isCrit) {
+        damageText.classList.add('crit');
+        damageText.textContent = `💥 КРИТ! -${damage}`;
+    }
+    
+    damageText.style.cssText = `
+        position: absolute;
+        top: 50%;
+        right: 20%;
+        font-size: ${isCrit ? '28px' : '24px'};
+        font-weight: bold;
+        color: ${isCrit ? '#ff0000' : '#ffff00'};
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        z-index: 1000;
+        animation: damageFloat 1s ease-out forwards;
+        pointer-events: none;
+    `;
+    
+    const combatArea = document.getElementById('combatArea');
+    if (combatArea) {
+        combatArea.appendChild(damageText);
+        setTimeout(() => damageText.remove(), 1000);
+    }
+}
+
+// Обновление HP бара врага
+function updateEnemyHealthBar() {
+    const player = getCurrentPlayer();
+    if (!player.currentEnemy) return;
+    
+    const enemy = gameData.enemies.find(e => e.id === player.currentEnemy);
+    if (!enemy) return;
+    
+    const hpBar = document.getElementById('enemyHpBar');
+    const hpText = document.getElementById('enemyHpText');
+    
+    if (hpBar) {
+        const percent = (enemy.hp / enemy.maxHp) * 100;
+        hpBar.style.width = `${percent}%`;
+    }
+    
+    if (hpText) {
+        hpText.textContent = `${enemy.hp}/${enemy.maxHp} HP`;
+    }
+}
+
+// Начало боя
+function startCombat() {
+    const player = getCurrentPlayer();
+    
+    // Выбираем врага по уровню игрока
+    const availableEnemies = gameData.enemies.filter(e => e.level <= player.level + 2);
+    if (availableEnemies.length === 0) {
+        player.currentEnemy = gameData.enemies[0].id;
+    } else {
+        const randomEnemy = availableEnemies[Math.floor(Math.random() * availableEnemies.length)];
+        player.currentEnemy = randomEnemy.id;
+        
+        // Восстанавливаем HP врага
+        const enemy = gameData.enemies.find(e => e.id === randomEnemy.id);
+        if (enemy) {
+            enemy.hp = enemy.maxHp;
+        }
+    }
+    
+    renderCombat();
+    saveGameData();
+}
+
+// Победа над врагом
+function defeatEnemy(enemy) {
+    const player = getCurrentPlayer();
+    
+    // Награды
+    player.coins += enemy.reward.coins;
+    addXP(enemy.reward.xp);
+    
+    // Шанс на сундук (30%)
+    if (Math.random() < 0.3) {
+        openChest();
+    }
+    
+    // Сброс текущего врага
+    player.currentEnemy = null;
+    
+    showNotification(`🎉 Победа над ${enemy.name}! +${enemy.reward.coins} монет, +${enemy.reward.xp} опыта`);
+    
+    updatePlayerStats();
+    renderCombat();
+    saveGameData();
+    
+    // Автоматически создаем нового врага
+    setTimeout(() => startCombat(), 2000);
 }
 
 // Подтверждение выполнения достижения
@@ -333,24 +649,45 @@ function confirmAchievement() {
     const player = getCurrentPlayer();
     const achievement = gameData.achievements.find(a => a.id === achievementId);
     
-    // Проверка, не выполнено ли уже сегодня
-    const today = new Date().toDateString();
-    const todayCompleted = player.completedAchievements.some(ca => 
-        ca.id === achievementId && new Date(ca.date).toDateString() === today
-    );
-    
-    if (todayCompleted) {
-        alert('Это достижение уже выполнено сегодня!');
-        modal.classList.remove('active');
-        return;
+    // Проверка, прошло ли 24 часа с последнего выполнения
+    const lastCompletion = player.completedAchievements.find(ca => ca.id === achievementId);
+    if (lastCompletion && lastCompletion.timestamp) {
+        const lastTime = new Date(lastCompletion.timestamp).getTime();
+        const now = new Date().getTime();
+        const hoursPassed = (now - lastTime) / (1000 * 60 * 60);
+        
+        if (hoursPassed < 24) {
+            const hoursLeft = Math.ceil(24 - hoursPassed);
+            alert(`Это достижение можно выполнить снова через ${hoursLeft} ${hoursLeft === 1 ? 'час' : hoursLeft < 5 ? 'часа' : 'часов'}!`);
+            modal.classList.remove('active');
+            return;
+        }
     }
     
-    // Добавление достижения
-    player.completedAchievements.push({
-        id: achievementId,
-        date: date,
-        points: achievement.points
-    });
+    // Сохранение timestamp выполнения
+    const timestamp = new Date().toISOString();
+    
+    // Обновление или добавление достижения
+    const existingIndex = player.completedAchievements.findIndex(ca => ca.id === achievementId);
+    if (existingIndex >= 0) {
+        player.completedAchievements[existingIndex] = {
+            id: achievementId,
+            date: date,
+            timestamp: timestamp,
+            points: achievement.points
+        };
+    } else {
+        player.completedAchievements.push({
+            id: achievementId,
+            date: date,
+            timestamp: timestamp,
+            points: achievement.points
+        });
+    }
+    
+    // НАНОСИМ УРОН ВРАГУ ЗА ДОСТИЖЕНИЕ!
+    const { damage, isCrit } = calculateAchievementDamage(achievement, player);
+    dealDamageToEnemy(damage, isCrit);
     
     // Добавление опыта
     addXP(achievement.points);
@@ -360,7 +697,7 @@ function confirmAchievement() {
     saveGameData();
     
     // Уведомление
-    showNotification(`✅ Достижение "${achievement.name}" выполнено! +${achievement.points} опыта`);
+    showNotification(`✅ Достижение "${achievement.name}" выполнено! Нанесено ${damage} урона врагу! +${achievement.points} опыта`);
 }
 
 // Рендеринг персонажа
@@ -445,7 +782,7 @@ function renderCharacter() {
 }
 
 // Рендеринг магазина
-function renderShop(category = 'upgrades') {
+function renderShop(category = 'chests') {
     const container = document.getElementById('shopItems');
     const player = getCurrentPlayer();
     container.innerHTML = '';
@@ -456,7 +793,15 @@ function renderShop(category = 'upgrades') {
         const card = document.createElement('div');
         card.className = 'shop-item';
         
-        const isOwned = player.accessories && player.accessories.includes(item.id);
+        if (item.type === 'chest') {
+            const rarityColors = {
+                common: '#95a5a6',
+                rare: '#3498db',
+                epic: '#9b59b6',
+                legendary: '#f39c12'
+            };
+            card.style.borderColor = rarityColors[item.rarity] || '#95a5a6';
+        }
         
         card.innerHTML = `
             <div class="shop-item-info">
@@ -465,9 +810,9 @@ function renderShop(category = 'upgrades') {
                 <div class="shop-item-price">💰 ${item.price} монет</div>
             </div>
             <div class="shop-item-actions">
-                <button class="btn-primary" ${player.coins < item.price || isOwned ? 'disabled' : ''} 
+                <button class="btn-primary" ${player.coins < item.price ? 'disabled' : ''} 
                     onclick="buyItem('${item.id}', '${category}')">
-                    ${isOwned ? 'Куплено' : 'Купить'}
+                    Купить
                 </button>
             </div>
         `;
@@ -491,17 +836,52 @@ function buyItem(itemId, category) {
     
     player.coins -= item.price;
     
-    if (category === 'cosmetics') {
+    if (item.type === 'chest') {
+        // Открываем сундук
+        openChestByRarity(item.rarity);
+    } else if (item.type === 'item' && itemId === 'health_potion') {
+        // Зелье здоровья
+        player.stats.health = Math.min(player.stats.maxHealth, player.stats.health + 50);
+        showNotification(`✅ Восстановлено 50 HP!`);
+        renderCombat();
+    } else if (category === 'cosmetics') {
         if (!player.accessories) player.accessories = [];
         player.accessories.push(itemId);
     }
     
     updatePlayerStats();
     renderShop(category);
-    renderCharacter();
+    renderEquipment();
     saveGameData();
     
-    showNotification(`✅ Куплено: ${item.name}`);
+    if (item.type !== 'chest') {
+        showNotification(`✅ Куплено: ${item.name}`);
+    }
+}
+
+// Открытие сундука определенной редкости
+function openChestByRarity(rarity) {
+    const player = getCurrentPlayer();
+    
+    const availableItems = gameData.equipmentTemplates.filter(t => t.rarity === rarity);
+    const randomItem = { ...availableItems[Math.floor(Math.random() * availableItems.length)] };
+    
+    randomItem.id = `item_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    if (!player.inventory) player.inventory = [];
+    player.inventory.push(randomItem);
+    
+    saveGameData();
+    renderEquipment();
+    
+    const rarityNames = {
+        common: 'Обычная',
+        rare: 'Редкая',
+        epic: 'Эпическая',
+        legendary: 'Легендарная'
+    };
+    
+    showNotification(`📦 Открыт сундук! Получена ${rarityNames[rarity]} экипировка: ${randomItem.name}!`);
 }
 
 // Рендеринг боссов
@@ -640,5 +1020,240 @@ function showNotification(message) {
     }, 3000);
 }
 
+// Рендеринг боевой системы
+function renderCombat() {
+    const player = getCurrentPlayer();
+    
+    // Обновление статов игрока
+    const totalStats = calculateTotalStats(player);
+    document.getElementById('playerAttack').textContent = totalStats.attack;
+    document.getElementById('playerDefense').textContent = totalStats.defense;
+    document.getElementById('playerHealth').textContent = player.stats.health;
+    document.getElementById('playerMaxHealth').textContent = player.stats.maxHealth;
+    document.getElementById('playerCrit').textContent = totalStats.crit;
+    
+    // Обновление врага
+    if (player.currentEnemy) {
+        const enemy = gameData.enemies.find(e => e.id === player.currentEnemy);
+        if (enemy) {
+            document.getElementById('enemySprite').textContent = enemy.sprite;
+            document.getElementById('enemyName').textContent = enemy.name;
+            document.getElementById('enemyLevel').textContent = `Уровень: ${enemy.level}`;
+            updateEnemyHealthBar();
+        }
+    } else {
+        document.getElementById('enemySprite').textContent = '❓';
+        document.getElementById('enemyName').textContent = 'Нет врага';
+        document.getElementById('enemyLevel').textContent = 'Нажмите "Начать бой"';
+    }
+}
+
+// Расчет общих статов с учетом экипировки
+function calculateTotalStats(player) {
+    const base = { ...player.stats };
+    
+    // Добавляем статы из экипировки
+    Object.values(player.equipment).forEach(item => {
+        if (item) {
+            if (item.attack) base.attack += item.attack;
+            if (item.defense) base.defense += item.defense;
+            if (item.crit) base.crit += item.crit;
+        }
+    });
+    
+    return base;
+}
+
+// Открытие сундука
+function openChest() {
+    const player = getCurrentPlayer();
+    
+    // Генерация случайной экипировки
+    const rarityChance = Math.random();
+    let rarity;
+    if (rarityChance < 0.5) rarity = 'common';
+    else if (rarityChance < 0.8) rarity = 'rare';
+    else if (rarityChance < 0.95) rarity = 'epic';
+    else rarity = 'legendary';
+    
+    const availableItems = gameData.equipmentTemplates.filter(t => t.rarity === rarity);
+    const randomItem = { ...availableItems[Math.floor(Math.random() * availableItems.length)] };
+    
+    // Добавляем уникальный ID
+    randomItem.id = `item_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Добавляем в инвентарь
+    if (!player.inventory) player.inventory = [];
+    player.inventory.push(randomItem);
+    
+    saveGameData();
+    renderEquipment();
+    
+    // Показываем что получили
+    const rarityNames = {
+        common: 'Обычная',
+        rare: 'Редкая',
+        epic: 'Эпическая',
+        legendary: 'Легендарная'
+    };
+    
+    showNotification(`📦 Получена ${rarityNames[rarity]} экипировка: ${randomItem.name}!`);
+}
+
+// Рендеринг экипировки
+function renderEquipment() {
+    const player = getCurrentPlayer();
+    
+    // Надетое
+    const equippedContainer = document.getElementById('equippedItems');
+    if (equippedContainer) {
+        equippedContainer.innerHTML = '';
+        
+        Object.entries(gameData.equipmentTypes).forEach(([slot, type]) => {
+            const item = player.equipment[slot];
+            const slotDiv = document.createElement('div');
+            slotDiv.className = 'equipment-slot';
+            
+            if (item) {
+                slotDiv.innerHTML = `
+                    <div class="equipped-item">
+                        <div class="item-icon">${item.icon || '📦'}</div>
+                        <div class="item-name">${item.name}</div>
+                        <div class="item-stats">
+                            ${item.attack ? `⚔️ +${item.attack}` : ''}
+                            ${item.defense ? `🛡️ +${item.defense}` : ''}
+                            ${item.crit ? `💥 +${item.crit}%` : ''}
+                        </div>
+                        <button class="btn-small" onclick="unequipItem('${slot}')">Снять</button>
+                    </div>
+                `;
+            } else {
+                slotDiv.innerHTML = `
+                    <div class="empty-slot">
+                        <div class="slot-icon">${type.icon}</div>
+                        <div class="slot-name">${type.name}</div>
+                        <div class="slot-empty">Пусто</div>
+                    </div>
+                `;
+            }
+            
+            equippedContainer.appendChild(slotDiv);
+        });
+    }
+    
+    // Инвентарь
+    const inventoryContainer = document.getElementById('inventoryItems');
+    if (inventoryContainer) {
+        inventoryContainer.innerHTML = '';
+        
+        if (!player.inventory || player.inventory.length === 0) {
+            inventoryContainer.innerHTML = '<div class="empty-inventory">Инвентарь пуст. Побеждайте врагов, чтобы получить сундуки!</div>';
+        } else {
+            player.inventory.forEach((item, index) => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'inventory-item';
+                
+                const rarityColors = {
+                    common: '#95a5a6',
+                    rare: '#3498db',
+                    epic: '#9b59b6',
+                    legendary: '#f39c12'
+                };
+                
+                itemDiv.style.borderColor = rarityColors[item.rarity] || '#95a5a6';
+                
+                itemDiv.innerHTML = `
+                    <div class="item-icon">${item.icon || '📦'}</div>
+                    <div class="item-info">
+                        <div class="item-name">${item.name}</div>
+                        <div class="item-stats">
+                            ${item.attack ? `⚔️ +${item.attack}` : ''}
+                            ${item.defense ? `🛡️ +${item.defense}` : ''}
+                            ${item.crit ? `💥 +${item.crit}%` : ''}
+                        </div>
+                        <div class="item-rarity">${item.rarity}</div>
+                    </div>
+                    <button class="btn-primary" onclick="equipItem(${index})">Надеть</button>
+                `;
+                
+                inventoryContainer.appendChild(itemDiv);
+            });
+        }
+    }
+}
+
+// Надеть предмет
+function equipItem(inventoryIndex) {
+    const player = getCurrentPlayer();
+    const item = player.inventory[inventoryIndex];
+    
+    if (!item) return;
+    
+    // Снимаем текущий предмет этого типа (если есть)
+    const currentItem = player.equipment[item.type];
+    if (currentItem) {
+        player.inventory.push(currentItem);
+    }
+    
+    // Надеваем новый
+    player.equipment[item.type] = item;
+    player.inventory.splice(inventoryIndex, 1);
+    
+    // Обновляем статы
+    updatePlayerStats();
+    renderCombat();
+    renderEquipment();
+    saveGameData();
+    
+    showNotification(`✅ Надето: ${item.name}`);
+}
+
+// Снять предмет
+function unequipItem(slot) {
+    const player = getCurrentPlayer();
+    const item = player.equipment[slot];
+    
+    if (!item) return;
+    
+    if (!player.inventory) player.inventory = [];
+    player.inventory.push(item);
+    player.equipment[slot] = null;
+    
+    updatePlayerStats();
+    renderCombat();
+    renderEquipment();
+    saveGameData();
+    
+    showNotification(`✅ Снято: ${item.name}`);
+}
+
+// Обновление статов в интерфейсе
+function updatePlayerStats() {
+    const player = getCurrentPlayer();
+    const totalStats = calculateTotalStats(player);
+    
+    document.getElementById('playerLevel').textContent = player.level;
+    document.getElementById('playerXP').textContent = player.xp;
+    document.getElementById('playerXPNeeded').textContent = getXPNeeded(player.level);
+    document.getElementById('playerCoins').textContent = player.coins;
+    document.getElementById('characterName').textContent = player.name;
+    
+    // Обновляем боевые статы если они есть
+    if (document.getElementById('playerAttack')) {
+        document.getElementById('playerAttack').textContent = totalStats.attack;
+        document.getElementById('playerDefense').textContent = totalStats.defense;
+        document.getElementById('playerHealth').textContent = player.stats.health;
+        document.getElementById('playerMaxHealth').textContent = player.stats.maxHealth;
+        document.getElementById('playerCrit').textContent = totalStats.crit;
+    }
+}
+
 // Инициализация при загрузке страницы
 document.addEventListener('DOMContentLoaded', initGame);
+
+// Очистка интервалов при закрытии страницы
+window.addEventListener('beforeunload', () => {
+    if (window.achievementUpdateInterval) {
+        clearInterval(window.achievementUpdateInterval);
+    }
+});

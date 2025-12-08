@@ -2,8 +2,14 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="Пиксельная игра-трекер достижений с системой прогресса, персонажей и боссов">
+    <meta name="theme-color" content="#667eea">
     <title>Очивки - Трекер Достижений</title>
+    
+    <!-- Telegram Web App -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -33,16 +39,59 @@
         </header>
 
         <nav class="game-nav">
-            <button class="nav-btn active" data-tab="achievements">🏆 Достижения</button>
+            <button class="nav-btn active" data-tab="combat">⚔️ Бой</button>
+            <button class="nav-btn" data-tab="achievements">🏆 Достижения</button>
             <button class="nav-btn" data-tab="character">👤 Персонаж</button>
+            <button class="nav-btn" data-tab="equipment">🎒 Экипировка</button>
             <button class="nav-btn" data-tab="shop">🛒 Магазин</button>
             <button class="nav-btn" data-tab="bosses">👹 Боссы</button>
-            <button class="nav-btn" data-tab="locations">🗺️ Локации</button>
         </nav>
 
         <main class="game-content">
+            <!-- Вкладка Бой -->
+            <div id="tab-combat" class="tab-content active">
+                <div id="combatArea" class="combat-area">
+                    <div class="player-side">
+                        <div class="character-combat">
+                            <div id="playerSprite" class="combat-sprite">👤</div>
+                            <div class="player-stats">
+                                <div class="stat-row">
+                                    <span>⚔️ Атака: <strong id="playerAttack">25</strong></span>
+                                    <span>🛡️ Защита: <strong id="playerDefense">10</strong></span>
+                                </div>
+                                <div class="stat-row">
+                                    <span>❤️ Здоровье: <strong id="playerHealth">100</strong>/<strong id="playerMaxHealth">100</strong></span>
+                                    <span>💥 Крит: <strong id="playerCrit">5</strong>%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="vs-divider">VS</div>
+                    <div class="enemy-side">
+                        <div class="enemy-combat">
+                            <div id="enemySprite" class="combat-sprite">😴</div>
+                            <div class="enemy-info">
+                                <div id="enemyName" class="enemy-name">Лень</div>
+                                <div class="enemy-hp-bar-container">
+                                    <div id="enemyHpBar" class="enemy-hp-bar"></div>
+                                </div>
+                                <div id="enemyHpText" class="enemy-hp-text">100/100 HP</div>
+                                <div id="enemyLevel" class="enemy-level">Уровень: 1</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="combat-actions">
+                    <button class="btn-primary" onclick="startCombat()">Начать бой</button>
+                    <button class="btn-secondary" onclick="renderCombat()">Обновить</button>
+                </div>
+                <div class="combat-tip">
+                    💡 Выполняйте достижения, чтобы наносить урон врагам!
+                </div>
+            </div>
+            
             <!-- Вкладка Достижения -->
-            <div id="tab-achievements" class="tab-content active">
+            <div id="tab-achievements" class="tab-content">
                 <div class="achievements-filter">
                     <button class="filter-btn active" data-filter="all">Все</button>
                     <button class="filter-btn" data-filter="easy">Легкие</button>
@@ -76,12 +125,24 @@
                 </div>
             </div>
 
+            <!-- Вкладка Экипировка -->
+            <div id="tab-equipment" class="tab-content">
+                <div class="equipment-section">
+                    <h3>Надетое</h3>
+                    <div id="equippedItems" class="equipped-items"></div>
+                </div>
+                <div class="equipment-section">
+                    <h3>Инвентарь</h3>
+                    <div id="inventoryItems" class="inventory-items"></div>
+                </div>
+            </div>
+
             <!-- Вкладка Магазин -->
             <div id="tab-shop" class="tab-content">
                 <div class="shop-categories">
-                    <button class="category-btn active" data-category="upgrades">Улучшения</button>
+                    <button class="category-btn active" data-category="chests">📦 Сундуки</button>
+                    <button class="category-btn" data-category="upgrades">Улучшения</button>
                     <button class="category-btn" data-category="items">Предметы</button>
-                    <button class="category-btn" data-category="cosmetics">Косметика</button>
                 </div>
                 <div id="shopItems" class="shop-items"></div>
             </div>
