@@ -96,6 +96,12 @@ const gameData = {
         items: [
             { id: 'health_potion', name: 'Зелье здоровья', desc: 'Восстанавливает 50 HP', price: 50, type: 'item' },
             { id: 'strength_potion', name: 'Зелье силы', desc: '+10 к атаке на 1 час', price: 75, type: 'item' }
+        ],
+        cosmetics: [
+            { id: 'hat_crown', name: 'Корона', desc: 'Золотая корона', price: 300, type: 'cosmetic' },
+            { id: 'hat_cap', name: 'Кепка', desc: 'Стильная кепка', price: 150, type: 'cosmetic' },
+            { id: 'glasses', name: 'Очки', desc: 'Крутые очки', price: 100, type: 'cosmetic' },
+            { id: 'cape', name: 'Плащ', desc: 'Геройский плащ', price: 250, type: 'cosmetic' }
         ]
     },
     
@@ -206,6 +212,32 @@ function loadGameData() {
         
         // Миграция старых данных: добавляем timestamp к старым достижениям и accumulatedDamage
         Object.values(gameData.players).forEach(player => {
+            // Инициализация базовых полей
+            if (!player.completedAchievements) player.completedAchievements = [];
+            if (player.accumulatedDamage === undefined) player.accumulatedDamage = 0;
+            if (!player.stats) {
+                player.stats = {
+                    attack: 25,
+                    defense: 10,
+                    health: 100,
+                    maxHealth: 100,
+                    crit: 5
+                };
+            }
+            if (!player.equipment) {
+                player.equipment = {
+                    weapon: null,
+                    helmet: null,
+                    armor: null,
+                    boots: null,
+                    accessory: null
+                };
+            }
+            if (!player.inventory) player.inventory = [];
+            if (player.xp === undefined) player.xp = 0;
+            if (player.level === undefined) player.level = 1;
+            if (player.coins === undefined) player.coins = 0;
+            
             if (player.completedAchievements) {
                 player.completedAchievements = player.completedAchievements.map(ca => {
                     if (!ca.timestamp && ca.date) {
@@ -216,10 +248,6 @@ function loadGameData() {
                     }
                     return ca;
                 });
-            }
-            // Инициализация накопленного урона если его нет
-            if (player.accumulatedDamage === undefined) {
-                player.accumulatedDamage = 0;
             }
         });
         saveGameData(); // Сохраняем мигрированные данные
@@ -296,10 +324,14 @@ function setupEventListeners() {
 function switchPlayer(playerId) {
     gameData.currentPlayer = playerId;
     document.querySelectorAll('.player-btn').forEach(btn => btn.classList.remove('active'));
-    document.getElementById(`select${playerId.charAt(0).toUpperCase() + playerId.slice(1)}`).classList.add('active');
+    const btnId = playerId === 'kirill' ? 'selectKirill' : 'selectYulya';
+    const btn = document.getElementById(btnId);
+    if (btn) btn.classList.add('active');
+    
     updatePlayerStats();
     renderAchievements();
     renderCharacter();
+    renderCombat();
     saveGameData();
 }
 
@@ -334,18 +366,48 @@ function getXPNeeded(level) {
 
 // Добавление опыта
 function addXP(amount) {
+    if (!amount || amount <= 0) {
+        console.warn('addXP: invalid amount', amount);
+        return;
+    }
+    
     const player = getCurrentPlayer();
+    if (!player) {
+        console.error('addXP: player not found');
+        return;
+    }
+    
+    // Инициализация XP если его нет
+    if (player.xp === undefined || player.xp === null) {
+        player.xp = 0;
+    }
+    if (player.level === undefined || player.level === null) {
+        player.level = 1;
+    }
+    
+    const oldLevel = player.level;
     player.xp += amount;
+    
+    console.log(`Adding ${amount} XP. Current: ${player.xp - amount} -> ${player.xp}`);
     
     // Проверка повышения уровня
     while (player.xp >= getXPNeeded(player.level)) {
         player.xp -= getXPNeeded(player.level);
         player.level++;
         const coinsEarned = Math.floor(50 * player.level);
+        
+        // Инициализация монет если их нет
+        if (player.coins === undefined || player.coins === null) {
+            player.coins = 0;
+        }
         player.coins += coinsEarned;
         
         // Анимация повышения уровня
         showLevelUpAnimation(coinsEarned);
+    }
+    
+    if (player.level > oldLevel) {
+        console.log(`Level up! ${oldLevel} -> ${player.level}`);
     }
     
     updatePlayerStats();
@@ -496,12 +558,18 @@ function openAchievementModal(achievementId) {
 
 // Расчет урона за достижение
 function calculateAchievementDamage(achievement, player) {
+    if (!achievement || !player) {
+        console.error('calculateAchievementDamage: achievement or player is missing');
+        return { damage: 0, isCrit: false };
+    }
+    
     const baseDamage = achievement.points * 2; // Базовый урон = очки * 2
-    const attackBonus = player.stats.attack;
+    const totalStats = calculateTotalStats(player);
+    const attackBonus = totalStats.attack;
     const totalDamage = baseDamage + attackBonus;
     
-    // Проверка крита
-    const isCrit = Math.random() * 100 < player.stats.crit;
+    // Проверка крита (используем общий стат крита с экипировкой)
+    const isCrit = Math.random() * 100 < totalStats.crit;
     const finalDamage = isCrit ? Math.floor(totalDamage * 1.5) : totalDamage;
     
     return { damage: finalDamage, isCrit };
@@ -712,16 +780,48 @@ function defeatEnemy(enemy) {
 // Подтверждение выполнения достижения
 function confirmAchievement() {
     const modal = document.getElementById('achievementModal');
-    const achievementId = modal.dataset.achievementId;
-    const date = document.getElementById('achievementDate').value;
+    if (!modal) {
+        console.error('Modal not found');
+        return;
+    }
     
+    const achievementId = modal.dataset.achievementId;
+    if (!achievementId) {
+        console.error('Achievement ID not found');
+        alert('Ошибка: ID достижения не найден');
+        return;
+    }
+    
+    const dateInput = document.getElementById('achievementDate');
+    if (!dateInput) {
+        console.error('Date input not found');
+        return;
+    }
+    
+    const date = dateInput.value;
     if (!date) {
         alert('Выберите дату выполнения!');
         return;
     }
     
     const player = getCurrentPlayer();
+    if (!player) {
+        console.error('Player not found');
+        return;
+    }
+    
     const achievement = gameData.achievements.find(a => a.id === achievementId);
+    if (!achievement) {
+        console.error('Achievement not found:', achievementId);
+        alert('Ошибка: достижение не найдено');
+        modal.classList.remove('active');
+        return;
+    }
+    
+    // Инициализация массива достижений если его нет
+    if (!player.completedAchievements) {
+        player.completedAchievements = [];
+    }
     
     // Проверка, прошло ли 24 часа с последнего выполнения
     const lastCompletion = player.completedAchievements.find(ca => ca.id === achievementId);
@@ -763,19 +863,33 @@ function confirmAchievement() {
     const { damage, isCrit } = calculateAchievementDamage(achievement, player);
     
     // Накапливаем урон вместо немедленного нанесения
-    if (!player.accumulatedDamage) player.accumulatedDamage = 0;
+    if (player.accumulatedDamage === undefined || player.accumulatedDamage === null) {
+        player.accumulatedDamage = 0;
+    }
     player.accumulatedDamage += damage;
     
     // Добавление опыта
-    addXP(achievement.points);
+    if (achievement.points && achievement.points > 0) {
+        addXP(achievement.points);
+    }
     
     modal.classList.remove('active');
     renderAchievements();
     renderCombat(); // Обновляем интерфейс боя для показа накопленного урона
+    updatePlayerStats(); // Обновляем статы
     saveGameData();
     
     // Уведомление
-    showNotification(`✅ Достижение "${achievement.name}" выполнено! Накоплено ${damage} урона (всего: ${player.accumulatedDamage})! +${achievement.points} опыта`);
+    const critText = isCrit ? ' 💥 КРИТ!' : '';
+    showNotification(`✅ Достижение "${achievement.name}" выполнено! Накоплено ${damage} урона${critText} (всего: ${player.accumulatedDamage})! +${achievement.points} опыта`);
+    
+    console.log('Achievement completed:', {
+        achievement: achievement.name,
+        points: achievement.points,
+        damage: damage,
+        totalDamage: player.accumulatedDamage,
+        isCrit: isCrit
+    });
 }
 
 // Рендеринг персонажа
@@ -783,80 +897,90 @@ function renderCharacter() {
     const player = getCurrentPlayer();
     const sprite = document.getElementById('characterSprite');
     
+    if (!sprite) return; // Если элемента нет, выходим
+    
     // Простой пиксельный спрайт (можно заменить на реальные спрайты)
-    sprite.style.background = player.clothesColor;
+    sprite.style.background = player.clothesColor || '#3498db';
     sprite.innerHTML = '👤';
     
     // Цвета волос
     const hairPicker = document.getElementById('hairColorPicker');
-    hairPicker.innerHTML = '';
-    const hairColors = ['#8B4513', '#000000', '#FFD700', '#FF69B4', '#00CED1', '#FF4500'];
-    hairColors.forEach(color => {
-        const option = document.createElement('div');
-        option.className = `color-option ${player.hairColor === color ? 'selected' : ''}`;
-        option.style.background = color;
-        option.addEventListener('click', () => {
-            player.hairColor = color;
-            document.querySelectorAll('#hairColorPicker .color-option').forEach(o => o.classList.remove('selected'));
-            option.classList.add('selected');
-            saveGameData();
+    if (hairPicker) {
+        hairPicker.innerHTML = '';
+        const hairColors = ['#8B4513', '#000000', '#FFD700', '#FF69B4', '#00CED1', '#FF4500'];
+        hairColors.forEach(color => {
+            const option = document.createElement('div');
+            option.className = `color-option ${player.hairColor === color ? 'selected' : ''}`;
+            option.style.background = color;
+            option.addEventListener('click', () => {
+                player.hairColor = color;
+                document.querySelectorAll('#hairColorPicker .color-option').forEach(o => o.classList.remove('selected'));
+                option.classList.add('selected');
+                saveGameData();
+            });
+            hairPicker.appendChild(option);
         });
-        hairPicker.appendChild(option);
-    });
+    }
     
     // Цвета одежды
     const clothesPicker = document.getElementById('clothesColorPicker');
-    clothesPicker.innerHTML = '';
-    const clothesColors = ['#3498db', '#e91e63', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c'];
-    clothesColors.forEach(color => {
-        const option = document.createElement('div');
-        option.className = `color-option ${player.clothesColor === color ? 'selected' : ''}`;
-        option.style.background = color;
-        option.addEventListener('click', () => {
-            player.clothesColor = color;
-            document.querySelectorAll('#clothesColorPicker .color-option').forEach(o => o.classList.remove('selected'));
-            option.classList.add('selected');
-            sprite.style.background = color;
-            saveGameData();
+    if (clothesPicker) {
+        clothesPicker.innerHTML = '';
+        const clothesColors = ['#3498db', '#e91e63', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c'];
+        clothesColors.forEach(color => {
+            const option = document.createElement('div');
+            option.className = `color-option ${player.clothesColor === color ? 'selected' : ''}`;
+            option.style.background = color;
+            option.addEventListener('click', () => {
+                player.clothesColor = color;
+                document.querySelectorAll('#clothesColorPicker .color-option').forEach(o => o.classList.remove('selected'));
+                option.classList.add('selected');
+                if (sprite) sprite.style.background = color;
+                saveGameData();
+            });
+            clothesPicker.appendChild(option);
         });
-        clothesPicker.appendChild(option);
-    });
+    }
     
     // Аксессуары
     const accessoriesList = document.getElementById('accessoriesList');
-    accessoriesList.innerHTML = '';
-    const allAccessories = [
-        { id: 'none', name: 'Нет', price: 0 },
-        ...gameData.shopItems.cosmetics
-    ];
-    
-    allAccessories.forEach(acc => {
-        const item = document.createElement('div');
-        const isOwned = acc.price === 0 || player.accessories.includes(acc.id);
-        const isEquipped = player.accessories.includes(acc.id);
+    if (accessoriesList) {
+        accessoriesList.innerHTML = '';
+        const allAccessories = [
+            { id: 'none', name: 'Нет', price: 0 },
+            ...(gameData.shopItems.cosmetics || [])
+        ];
         
-        item.className = `accessory-item ${isOwned ? 'owned' : ''} ${isEquipped ? 'equipped' : ''}`;
-        item.textContent = acc.name;
-        
-        if (isOwned) {
-            item.addEventListener('click', () => {
-                if (isEquipped) {
-                    player.accessories = player.accessories.filter(a => a !== acc.id);
-                } else {
-                    if (acc.id !== 'none') {
-                        player.accessories.push(acc.id);
+        allAccessories.forEach(acc => {
+            const item = document.createElement('div');
+            const isOwned = acc.price === 0 || (player.accessories && player.accessories.includes(acc.id));
+            const isEquipped = player.accessories && player.accessories.includes(acc.id);
+            
+            item.className = `accessory-item ${isOwned ? 'owned' : ''} ${isEquipped ? 'equipped' : ''}`;
+            item.textContent = acc.name;
+            
+            if (isOwned) {
+                item.addEventListener('click', () => {
+                    if (!player.accessories) player.accessories = [];
+                    
+                    if (isEquipped) {
+                        player.accessories = player.accessories.filter(a => a !== acc.id);
+                    } else {
+                        if (acc.id !== 'none') {
+                            player.accessories.push(acc.id);
+                        }
                     }
-                }
-                renderCharacter();
-                saveGameData();
-            });
-        } else {
-            item.style.opacity = '0.5';
-            item.textContent += ` (${acc.price}💰)`;
-        }
-        
-        accessoriesList.appendChild(item);
-    });
+                    renderCharacter();
+                    saveGameData();
+                });
+            } else {
+                item.style.opacity = '0.5';
+                item.textContent += ` (${acc.price}💰)`;
+            }
+            
+            accessoriesList.appendChild(item);
+        });
+    }
 }
 
 // Рендеринг магазина
@@ -1168,16 +1292,23 @@ function renderCombat() {
 
 // Расчет общих статов с учетом экипировки
 function calculateTotalStats(player) {
+    if (!player || !player.stats) {
+        console.error('calculateTotalStats: player or stats missing');
+        return { attack: 25, defense: 10, health: 100, maxHealth: 100, crit: 5 };
+    }
+    
     const base = { ...player.stats };
     
     // Добавляем статы из экипировки
-    Object.values(player.equipment).forEach(item => {
-        if (item) {
-            if (item.attack) base.attack += item.attack;
-            if (item.defense) base.defense += item.defense;
-            if (item.crit) base.crit += item.crit;
-        }
-    });
+    if (player.equipment) {
+        Object.values(player.equipment).forEach(item => {
+            if (item) {
+                if (item.attack) base.attack += item.attack;
+                if (item.defense) base.defense += item.defense;
+                if (item.crit) base.crit += item.crit;
+            }
+        });
+    }
     
     return base;
 }
