@@ -81,12 +81,18 @@
                         </div>
                     </div>
                 </div>
+                <div class="accumulated-damage">
+                    <div class="damage-counter">
+                        <span class="damage-label">⚔️ Накопленный урон:</span>
+                        <span id="accumulatedDamage" class="damage-value">0</span>
+                    </div>
+                </div>
                 <div class="combat-actions">
-                    <button class="btn-primary" onclick="startCombat()">Начать бой</button>
-                    <button class="btn-secondary" onclick="renderCombat()">Обновить</button>
+                    <button class="btn-primary btn-attack" id="attackButton" onclick="attackEnemy()">⚔️ Атаковать</button>
+                    <button class="btn-secondary" onclick="startCombat()">🔄 Новый враг</button>
                 </div>
                 <div class="combat-tip">
-                    💡 Выполняйте достижения, чтобы наносить урон врагам!
+                    💡 Выполняйте достижения, чтобы накапливать урон! Затем нажмите "Атаковать" для нанесения урона врагу.
                 </div>
             </div>
             

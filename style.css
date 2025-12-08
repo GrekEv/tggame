@@ -783,6 +783,49 @@ body {
     color: #2c3e50;
 }
 
+/* Накопленный урон */
+.accumulated-damage {
+    background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+    border-radius: 10px;
+    padding: 15px;
+    margin: 15px 0;
+    text-align: center;
+    box-shadow: 0 5px 15px rgba(231, 76, 60, 0.3);
+}
+
+.damage-counter {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: white;
+}
+
+.damage-label {
+    font-size: 16px;
+    font-weight: bold;
+}
+
+.damage-value {
+    font-size: 20px;
+    font-weight: bold;
+    color: #ffff00;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+    transition: all 0.3s;
+}
+
+.btn-attack {
+    font-size: 18px;
+    padding: 12px 24px;
+    min-width: 200px;
+}
+
+.btn-attack:disabled {
+    background: #95a5a6;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
 /* Индикатор урона */
 .damage-indicator {
     animation: damageFloat 1s ease-out forwards;

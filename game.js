@@ -28,7 +28,8 @@ const gameData = {
                 accessory: null
             },
             inventory: [],
-            currentEnemy: null
+            currentEnemy: null,
+            accumulatedDamage: 0 // Накопленный урон за достижения
         },
         yulya: {
             name: 'ЮЛЯ',
@@ -57,7 +58,8 @@ const gameData = {
                 accessory: null
             },
             inventory: [],
-            currentEnemy: null
+            currentEnemy: null,
+            accumulatedDamage: 0 // Накопленный урон за достижения
         }
     },
     currentPlayer: 'kirill',
@@ -202,7 +204,7 @@ function loadGameData() {
         Object.assign(gameData.players, parsed.players || {});
         gameData.currentPlayer = parsed.currentPlayer || 'kirill';
         
-        // Миграция старых данных: добавляем timestamp к старым достижениям
+        // Миграция старых данных: добавляем timestamp к старым достижениям и accumulatedDamage
         Object.values(gameData.players).forEach(player => {
             if (player.completedAchievements) {
                 player.completedAchievements = player.completedAchievements.map(ca => {
@@ -214,6 +216,10 @@ function loadGameData() {
                     }
                     return ca;
                 });
+            }
+            // Инициализация накопленного урона если его нет
+            if (player.accumulatedDamage === undefined) {
+                player.accumulatedDamage = 0;
             }
         });
         saveGameData(); // Сохраняем мигрированные данные
@@ -501,11 +507,65 @@ function calculateAchievementDamage(achievement, player) {
     return { damage: finalDamage, isCrit };
 }
 
-// Нанесение урона текущему врагу
+// Атака врага (расходует накопленный урон)
+function attackEnemy() {
+    const player = getCurrentPlayer();
+    
+    // Проверка наличия врага
+    if (!player.currentEnemy) {
+        showNotification('Сначала выберите врага!');
+        startCombat();
+        return;
+    }
+    
+    // Проверка накопленного урона
+    if (!player.accumulatedDamage || player.accumulatedDamage <= 0) {
+        showNotification('Нет накопленного урона! Выполните достижения, чтобы накопить урон.');
+        return;
+    }
+    
+    const enemy = gameData.enemies.find(e => e.id === player.currentEnemy);
+    if (!enemy) {
+        startCombat();
+        return;
+    }
+    
+    // Расходуем весь накопленный урон
+    const damage = player.accumulatedDamage;
+    const totalStats = calculateTotalStats(player);
+    
+    // Проверка крита (шанс зависит от стата крита)
+    const isCrit = Math.random() * 100 < totalStats.crit;
+    const finalDamage = isCrit ? Math.floor(damage * 1.5) : damage;
+    
+    // Наносим урон
+    enemy.hp = Math.max(0, enemy.hp - finalDamage);
+    
+    // Обнуляем накопленный урон
+    player.accumulatedDamage = 0;
+    
+    // Визуализация урона
+    showDamageIndicator(finalDamage, isCrit);
+    
+    // Обновление HP бара врага
+    updateEnemyHealthBar();
+    
+    // Обновляем интерфейс
+    renderCombat();
+    saveGameData();
+    
+    // Проверка победы
+    if (enemy.hp <= 0) {
+        defeatEnemy(enemy);
+    } else {
+        showNotification(`⚔️ Нанесено ${finalDamage} урона! ${isCrit ? '💥 КРИТИЧЕСКИЙ УДАР!' : ''}`);
+    }
+}
+
+// Нанесение урона текущему врагу (старая функция, оставлена для совместимости)
 function dealDamageToEnemy(damage, isCrit) {
     const player = getCurrentPlayer();
     if (!player.currentEnemy) {
-        // Если нет текущего врага, создаем нового
         startCombat();
         return;
     }
@@ -586,9 +646,14 @@ function updateEnemyHealthBar() {
     }
 }
 
-// Начало боя
+// Начало боя (выбор нового врага)
 function startCombat() {
     const player = getCurrentPlayer();
+    
+    // Инициализация накопленного урона если его нет
+    if (player.accumulatedDamage === undefined) {
+        player.accumulatedDamage = 0;
+    }
     
     // Выбираем врага по уровню игрока
     const availableEnemies = gameData.enemies.filter(e => e.level <= player.level + 2);
@@ -607,6 +672,8 @@ function startCombat() {
     
     renderCombat();
     saveGameData();
+    
+    showNotification('🔄 Выбран новый враг! Выполняйте достижения, чтобы накопить урон для атаки.');
 }
 
 // Победа над врагом
@@ -625,14 +692,21 @@ function defeatEnemy(enemy) {
     // Сброс текущего врага
     player.currentEnemy = null;
     
+    // Накопленный урон НЕ сбрасывается - можно использовать на следующего врага
+    
     showNotification(`🎉 Победа над ${enemy.name}! +${enemy.reward.coins} монет, +${enemy.reward.xp} опыта`);
     
     updatePlayerStats();
     renderCombat();
     saveGameData();
     
-    // Автоматически создаем нового врага
-    setTimeout(() => startCombat(), 2000);
+    // Автоматически создаем нового врага через 2 секунды
+    setTimeout(() => {
+        startCombat();
+        if (player.accumulatedDamage > 0) {
+            showNotification(`💡 У вас есть ${player.accumulatedDamage} накопленного урона! Можете сразу атаковать нового врага.`);
+        }
+    }, 2000);
 }
 
 // Подтверждение выполнения достижения
@@ -685,19 +759,23 @@ function confirmAchievement() {
         });
     }
     
-    // НАНОСИМ УРОН ВРАГУ ЗА ДОСТИЖЕНИЕ!
+    // НАКАПЛИВАЕМ УРОН ЗА ДОСТИЖЕНИЕ!
     const { damage, isCrit } = calculateAchievementDamage(achievement, player);
-    dealDamageToEnemy(damage, isCrit);
+    
+    // Накапливаем урон вместо немедленного нанесения
+    if (!player.accumulatedDamage) player.accumulatedDamage = 0;
+    player.accumulatedDamage += damage;
     
     // Добавление опыта
     addXP(achievement.points);
     
     modal.classList.remove('active');
     renderAchievements();
+    renderCombat(); // Обновляем интерфейс боя для показа накопленного урона
     saveGameData();
     
     // Уведомление
-    showNotification(`✅ Достижение "${achievement.name}" выполнено! Нанесено ${damage} урона врагу! +${achievement.points} опыта`);
+    showNotification(`✅ Достижение "${achievement.name}" выполнено! Накоплено ${damage} урона (всего: ${player.accumulatedDamage})! +${achievement.points} опыта`);
 }
 
 // Рендеринг персонажа
@@ -1024,27 +1102,67 @@ function showNotification(message) {
 function renderCombat() {
     const player = getCurrentPlayer();
     
+    // Инициализация накопленного урона если его нет
+    if (player.accumulatedDamage === undefined) {
+        player.accumulatedDamage = 0;
+    }
+    
     // Обновление статов игрока
     const totalStats = calculateTotalStats(player);
-    document.getElementById('playerAttack').textContent = totalStats.attack;
-    document.getElementById('playerDefense').textContent = totalStats.defense;
-    document.getElementById('playerHealth').textContent = player.stats.health;
-    document.getElementById('playerMaxHealth').textContent = player.stats.maxHealth;
-    document.getElementById('playerCrit').textContent = totalStats.crit;
+    if (document.getElementById('playerAttack')) {
+        document.getElementById('playerAttack').textContent = totalStats.attack;
+        document.getElementById('playerDefense').textContent = totalStats.defense;
+        document.getElementById('playerHealth').textContent = player.stats.health;
+        document.getElementById('playerMaxHealth').textContent = player.stats.maxHealth;
+        document.getElementById('playerCrit').textContent = totalStats.crit;
+    }
+    
+    // Обновление накопленного урона
+    const accumulatedDamageEl = document.getElementById('accumulatedDamage');
+    if (accumulatedDamageEl) {
+        accumulatedDamageEl.textContent = player.accumulatedDamage || 0;
+        
+        // Визуальное выделение если есть урон
+        if (player.accumulatedDamage > 0) {
+            accumulatedDamageEl.style.color = '#e74c3c';
+            accumulatedDamageEl.style.fontWeight = 'bold';
+            accumulatedDamageEl.style.fontSize = '24px';
+        } else {
+            accumulatedDamageEl.style.color = '#7f8c8d';
+            accumulatedDamageEl.style.fontWeight = 'normal';
+            accumulatedDamageEl.style.fontSize = '20px';
+        }
+    }
+    
+    // Обновление кнопки атаки
+    const attackButton = document.getElementById('attackButton');
+    if (attackButton) {
+        if (player.accumulatedDamage > 0) {
+            attackButton.disabled = false;
+            attackButton.textContent = `⚔️ Атаковать (${player.accumulatedDamage} урона)`;
+        } else {
+            attackButton.disabled = true;
+            attackButton.textContent = '⚔️ Атаковать (нет урона)';
+        }
+    }
     
     // Обновление врага
     if (player.currentEnemy) {
         const enemy = gameData.enemies.find(e => e.id === player.currentEnemy);
         if (enemy) {
-            document.getElementById('enemySprite').textContent = enemy.sprite;
-            document.getElementById('enemyName').textContent = enemy.name;
-            document.getElementById('enemyLevel').textContent = `Уровень: ${enemy.level}`;
+            if (document.getElementById('enemySprite')) {
+                document.getElementById('enemySprite').textContent = enemy.sprite;
+                document.getElementById('enemyName').textContent = enemy.name;
+                document.getElementById('enemyLevel').textContent = `Уровень: ${enemy.level}`;
+            }
             updateEnemyHealthBar();
         }
     } else {
-        document.getElementById('enemySprite').textContent = '❓';
-        document.getElementById('enemyName').textContent = 'Нет врага';
-        document.getElementById('enemyLevel').textContent = 'Нажмите "Начать бой"';
+        if (document.getElementById('enemySprite')) {
+            document.getElementById('enemySprite').textContent = '❓';
+            document.getElementById('enemyName').textContent = 'Нет врага';
+            document.getElementById('enemyLevel').textContent = 'Нажмите "Новый враг"';
+        }
     }
 }
 
