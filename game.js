@@ -29,24 +29,21 @@ const gameData = {
     currentPlayer: 'kirill',
     
     achievements: [
-        { id: 'wake_early', name: 'Ранняя пташка', desc: 'Проснуться до 7 утра', points: 10, difficulty: 'easy' },
-        { id: 'exercise', name: 'Зарядка', desc: 'Сделать зарядку', points: 15, difficulty: 'easy' },
-        { id: 'read_book', name: 'Книжный червь', desc: 'Прочитать 10 страниц', points: 20, difficulty: 'easy' },
-        { id: 'meditation', name: 'Дзен', desc: 'Помедитировать 10 минут', points: 15, difficulty: 'easy' },
-        { id: 'healthy_meal', name: 'Здоровое питание', desc: 'Съесть здоровый обед', points: 12, difficulty: 'easy' },
-        { id: 'water_intake', name: 'Водный баланс', desc: 'Выпить 2 литра воды', points: 10, difficulty: 'easy' },
-        { id: 'no_social', name: 'Цифровой детокс', desc: 'Не заходить в соцсети до обеда', points: 25, difficulty: 'medium' },
-        { id: 'learn_skill', name: 'Новый навык', desc: 'Учить новый навык 1 час', points: 30, difficulty: 'medium' },
-        { id: 'workout', name: 'Тренировка', desc: 'Тренировка в зале', points: 35, difficulty: 'medium' },
-        { id: 'cook_meal', name: 'Шеф-повар', desc: 'Приготовить новое блюдо', points: 20, difficulty: 'medium' },
-        { id: 'write_journal', name: 'Дневник', desc: 'Написать в дневнике', points: 15, difficulty: 'medium' },
-        { id: 'help_someone', name: 'Доброе дело', desc: 'Помочь кому-то', points: 25, difficulty: 'medium' },
-        { id: 'project_progress', name: 'Прогресс проекта', desc: 'Сделать значительный прогресс в проекте', points: 50, difficulty: 'hard' },
-        { id: 'marathon', name: 'Марафонец', desc: 'Пробежать 5 км', points: 60, difficulty: 'hard' },
-        { id: 'master_class', name: 'Мастер-класс', desc: 'Провести мастер-класс', points: 75, difficulty: 'hard' },
-        { id: 'big_goal', name: 'Большая цель', desc: 'Достичь крупной цели', points: 100, difficulty: 'hard' },
-        { id: 'week_streak', name: 'Неделя подряд', desc: 'Выполнять достижения 7 дней подряд', points: 80, difficulty: 'hard' },
-        { id: 'month_streak', name: 'Месяц силы', desc: 'Выполнять достижения 30 дней подряд', points: 200, difficulty: 'hard' }
+        // Легкие достижения (5-7 очков)
+        { id: 'morning_exercise', name: 'Утренняя зарядка', desc: 'Утренняя зарядка, растяжка', points: 5, difficulty: 'easy' },
+        { id: 'vitamins', name: 'Витамины', desc: 'Выпить витамины', points: 5, difficulty: 'easy' },
+        { id: 'healthy_nutrition', name: 'Правильное питание', desc: 'Правильно питаться день', points: 7, difficulty: 'easy' },
+        { id: 'win_game', name: 'Победитель', desc: 'Выиграть в шахматы/шашки/уголки', points: 5, difficulty: 'easy' },
+        
+        // Средние достижения (10-15 очков)
+        { id: 'screen_time', name: 'Цифровой контроль', desc: 'Экранное время на телефоне меньше 2 часов', points: 10, difficulty: 'medium' },
+        { id: 'sleep_8h', name: 'Здоровый сон', desc: 'Сон 8 часов (ночью)', points: 10, difficulty: 'medium' },
+        { id: 'fun_fact', name: 'Фактолог', desc: 'Узнать какой-то мега крутой фан факт и рассказать другому', points: 10, difficulty: 'medium' },
+        { id: 'close_debt', name: 'Закрыть долг', desc: 'Закрыть один долг по учебе', points: 10, difficulty: 'medium' },
+        { id: 'new_skill', name: 'Новый навык', desc: 'Освоить любой новый навык', points: 15, difficulty: 'medium' },
+        
+        // Сложные достижения (20+ очков)
+        { id: 'learn_language', name: 'Полиглот', desc: 'Выучить новый язык на начальном уровне', points: 20, difficulty: 'hard' }
     ],
     
     shopItems: {
@@ -89,6 +86,18 @@ const gameData = {
 
 // Инициализация игры
 function initGame() {
+    // Инициализация Telegram Web App (если доступно)
+    if (window.Telegram && window.Telegram.WebApp) {
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+        tg.enableClosingConfirmation();
+        
+        // Установка цвета темы
+        tg.setHeaderColor('#667eea');
+        tg.setBackgroundColor('#667eea');
+    }
+    
     loadGameData();
     setupEventListeners();
     renderAchievements();
