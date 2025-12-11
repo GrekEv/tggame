@@ -529,6 +529,101 @@ body {
     font-style: italic;
 }
 
+.game-mode-switcher {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+}
+
+.btn-mode-switch {
+    padding: 10px 20px;
+    background: #ecf0f1;
+    border: 2px solid #34495e;
+    border-radius: 5px;
+    cursor: pointer;
+    font-weight: bold;
+    color: #2c3e50;
+    transition: all 0.3s;
+    flex: 1;
+    min-width: 120px;
+}
+
+.btn-mode-switch:hover:not(:disabled) {
+    background: #bdc3c7;
+    transform: translateY(-2px);
+}
+
+.btn-mode-switch.active {
+    background: #667eea;
+    color: white;
+    border-color: #667eea;
+}
+
+.btn-mode-switch:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Гайд/Туториал */
+.tutorial-modal {
+    max-width: 600px;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+.tutorial-content {
+    padding: 20px;
+    min-height: 300px;
+}
+
+.tutorial-content h2 {
+    color: #2c3e50;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.tutorial-step-content {
+    line-height: 1.8;
+    color: #34495e;
+}
+
+.tutorial-step-content ul,
+.tutorial-step-content ol {
+    margin: 15px 0;
+    padding-left: 25px;
+}
+
+.tutorial-step-content li {
+    margin: 8px 0;
+}
+
+.tutorial-step-content strong {
+    color: #2c3e50;
+    font-weight: bold;
+}
+
+.tutorial-navigation {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px;
+    border-top: 2px solid #ecf0f1;
+    background: #f8f9fa;
+    border-radius: 0 0 10px 10px;
+}
+
+.tutorial-progress {
+    font-weight: bold;
+    color: #667eea;
+    font-size: 16px;
+}
+
+.tutorial-navigation > div {
+    display: flex;
+    gap: 10px;
+}
+
 .telegram-user-info {
     margin: 15px 0;
     padding: 15px;

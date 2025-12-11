@@ -4,6 +4,7 @@ const gameData = {
     isRegistered: false, // Зарегистрирован ли пользователь
     playerId: null, // Уникальный ID игрока
     telegramUser: null, // Данные пользователя из Telegram
+    tutorialCompleted: false, // Пройден ли гайд
     player: {
         name: '',
         level: 1,
@@ -249,6 +250,12 @@ function initGame() {
         return;
     }
     
+    // Показываем гайд при первом входе
+    if (!gameData.tutorialCompleted) {
+        showTutorial();
+        return; // Не продолжаем инициализацию до завершения гайда
+    }
+    
     // Проверяем, выбран ли режим игры
     if (!gameData.gameMode) {
         // Показываем модальное окно выбора режима
@@ -289,15 +296,16 @@ function loadGameData() {
     if (saved) {
         const parsed = JSON.parse(saved);
         
-        // Загружаем данные регистрации
-        gameData.isRegistered = parsed.isRegistered || false;
-        gameData.playerId = parsed.playerId || null;
-        gameData.telegramUser = parsed.telegramUser || null;
-        gameData.partnerId = parsed.partnerId || null;
+        // Загружаем данные регистрации (сохраняем существующие значения)
+        if (parsed.isRegistered !== undefined) gameData.isRegistered = parsed.isRegistered;
+        if (parsed.playerId !== undefined) gameData.playerId = parsed.playerId;
+        if (parsed.telegramUser !== undefined) gameData.telegramUser = parsed.telegramUser;
+        if (parsed.partnerId !== undefined) gameData.partnerId = parsed.partnerId;
+        if (parsed.tutorialCompleted !== undefined) gameData.tutorialCompleted = parsed.tutorialCompleted;
         
         // Загружаем режим игры
-        gameData.gameMode = parsed.gameMode || null;
-        gameData.currentPlayerId = parsed.currentPlayerId || 'player1';
+        if (parsed.gameMode !== undefined) gameData.gameMode = parsed.gameMode;
+        if (parsed.currentPlayerId !== undefined) gameData.currentPlayerId = parsed.currentPlayerId;
         
         // Миграция старых данных (если есть два персонажа)
         if (parsed.players) {
@@ -381,7 +389,7 @@ function loadGameData() {
             }
         }
         
-        // Загружаем отчеты
+        // Загружаем отчеты (чат между партнерами)
         if (parsed.reports && Array.isArray(parsed.reports)) {
             gameData.reports = parsed.reports;
         } else {
@@ -395,6 +403,24 @@ function loadGameData() {
             gameData.sharedBosses = [];
         }
         
+        // Загружаем общие данные для режима дуо
+        if (parsed.sharedData && gameData.gameMode === 'competition') {
+            // Восстанавливаем общие данные если они есть
+            // Примечание: общий урон и монеты вычисляются из данных игроков
+            // Но можем использовать sharedData для отображения
+            if (parsed.sharedData.sharedAchievements) {
+                // Обновляем достижения игроков на основе общих
+                syncAchievementsFromShared(parsed.sharedData.sharedAchievements);
+            }
+        }
+        
+        // Загружаем список друзей
+        if (parsed.friends && Array.isArray(parsed.friends)) {
+            gameData.friends = parsed.friends;
+        } else {
+            gameData.friends = [];
+        }
+        
         // Инициализация базовых полей для первого игрока
         initPlayerData(gameData.player);
         
@@ -403,8 +429,59 @@ function loadGameData() {
             initPlayerData(gameData.player2);
         }
         
+        // В режиме дуо инициализируем общих боссов если их нет
+        if (gameData.gameMode === 'competition' && (!gameData.sharedBosses || gameData.sharedBosses.length === 0)) {
+            gameData.sharedBosses = gameData.bosses.map(boss => ({
+                id: boss.id,
+                isDefeated: false
+            }));
+        }
+        
         saveGameData(); // Сохраняем мигрированные данные
     }
+}
+
+// Синхронизация достижений из общих данных
+function syncAchievementsFromShared(sharedAchievements) {
+    if (gameData.gameMode !== 'competition' || !gameData.player2) return;
+    
+    // Обновляем достижения первого игрока
+    if (!gameData.player.completedAchievements) {
+        gameData.player.completedAchievements = [];
+    }
+    
+    // Обновляем достижения второго игрока
+    if (!gameData.player2.completedAchievements) {
+        gameData.player2.completedAchievements = [];
+    }
+    
+    // Синхронизируем достижения на основе общих данных
+    sharedAchievements.forEach(sharedAch => {
+        const player1Has = gameData.player.completedAchievements.find(a => a.id === sharedAch.id);
+        const player2Has = gameData.player2.completedAchievements.find(a => a.id === sharedAch.id);
+        
+        if (sharedAch.completedBy === 'player1' || sharedAch.completedBy === 'both') {
+            if (!player1Has) {
+                gameData.player.completedAchievements.push({
+                    id: sharedAch.id,
+                    date: sharedAch.completedAt ? new Date(sharedAch.completedAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                    timestamp: sharedAch.completedAt || new Date().toISOString(),
+                    difficulty: sharedAch.difficulty
+                });
+            }
+        }
+        
+        if (sharedAch.completedBy === 'player2' || sharedAch.completedBy === 'both') {
+            if (!player2Has) {
+                gameData.player2.completedAchievements.push({
+                    id: sharedAch.id,
+                    date: sharedAch.completedAt ? new Date(sharedAch.completedAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                    timestamp: sharedAch.completedAt || new Date().toISOString(),
+                    difficulty: sharedAch.difficulty
+                });
+            }
+        }
+    });
 }
 
 // Инициализация данных игрока
@@ -458,27 +535,173 @@ function initPlayerData(player) {
 
 // Сохранение данных в localStorage
 function saveGameData() {
+    // Убеждаемся, что все данные инициализированы перед сохранением
+    initPlayerData(gameData.player);
+    if (gameData.player2) {
+        initPlayerData(gameData.player2);
+    }
+    
     const dataToSave = {
+        isRegistered: gameData.isRegistered,
+        playerId: gameData.playerId,
+        telegramUser: gameData.telegramUser,
+        partnerId: gameData.partnerId,
+        tutorialCompleted: gameData.tutorialCompleted,
         gameMode: gameData.gameMode,
-        player: gameData.player,
         currentPlayerId: gameData.currentPlayerId,
-        reports: gameData.reports || [],
-        sharedBosses: gameData.sharedBosses || [],
+        player: {
+            ...gameData.player,
+            // Явно сохраняем все важные поля
+            name: gameData.player.name || 'Игрок',
+            level: gameData.player.level || 1,
+            xp: gameData.player.xp || 0,
+            coins: gameData.player.coins || 0,
+            accumulatedDamage: gameData.player.accumulatedDamage || 0,
+            completedAchievements: gameData.player.completedAchievements || [],
+            customAchievements: gameData.player.customAchievements || [],
+            inProgressAchievements: gameData.player.inProgressAchievements || [],
+            defeatedBosses: gameData.player.defeatedBosses || [],
+            unlockedLocations: gameData.player.unlockedLocations || ['forest'],
+            stats: gameData.player.stats || {
+                attack: 25,
+                defense: 10,
+                health: 100,
+                maxHealth: 100,
+                crit: 5
+            },
+            equipment: gameData.player.equipment || {
+                weapon: null,
+                helmet: null,
+                armor: null,
+                boots: null,
+                accessory: null
+            },
+            inventory: gameData.player.inventory || [],
+            customization: gameData.player.customization || {
+                face: { skinColor: '#FDBCB4', eyeType: 'normal', eyeColor: '#4A90E2', eyebrowType: 'normal', noseType: 'normal', mouthType: 'smile' },
+                hair: { style: 'short', color: '#8B4513' },
+                clothing: { top: 'tshirt', topColor: '#3498db', bottom: 'pants', bottomColor: '#2c3e50', shoes: 'sneakers', shoesColor: '#1a1a1a' },
+                accessories: []
+            }
+        },
+        // В режиме дуо сохраняем данные второго игрока
+        player2: (gameData.gameMode === 'competition' && gameData.player2) ? {
+            ...gameData.player2,
+            name: gameData.player2.name || 'Партнер',
+            level: gameData.player2.level || 1,
+            xp: gameData.player2.xp || 0,
+            coins: gameData.player2.coins || 0,
+            accumulatedDamage: gameData.player2.accumulatedDamage || 0,
+            completedAchievements: gameData.player2.completedAchievements || [],
+            customAchievements: gameData.player2.customAchievements || [],
+            inProgressAchievements: gameData.player2.inProgressAchievements || [],
+            defeatedBosses: gameData.player2.defeatedBosses || [],
+            unlockedLocations: gameData.player2.unlockedLocations || ['forest'],
+            stats: gameData.player2.stats || {
+                attack: 25,
+                defense: 10,
+                health: 100,
+                maxHealth: 100,
+                crit: 5
+            },
+            equipment: gameData.player2.equipment || {
+                weapon: null,
+                helmet: null,
+                armor: null,
+                boots: null,
+                accessory: null
+            },
+            inventory: gameData.player2.inventory || [],
+            customization: gameData.player2.customization || {
+                face: { skinColor: '#FDBCB4', eyeType: 'normal', eyeColor: '#4A90E2', eyebrowType: 'normal', noseType: 'normal', mouthType: 'smile' },
+                hair: { style: 'short', color: '#8B4513' },
+                clothing: { top: 'tshirt', topColor: '#3498db', bottom: 'pants', bottomColor: '#2c3e50', shoes: 'sneakers', shoesColor: '#1a1a1a' },
+                accessories: []
+            }
+        } : null,
+        // Общие данные для режима дуо
+        reports: gameData.reports || [], // Чат/отчеты между партнерами
+        sharedBosses: gameData.sharedBosses || [], // Общие боссы
+        sharedData: gameData.gameMode === 'competition' ? {
+            // Общие достижения (достижения, которые выполнил хотя бы один из партнеров)
+            sharedAchievements: getSharedAchievements(),
+            // Общий урон боссу (сумма урона обоих игроков)
+            sharedDamage: (gameData.player.accumulatedDamage || 0) + (gameData.player2?.accumulatedDamage || 0),
+            // Общие монеты (сумма монет обоих игроков для отображения)
+            sharedCoins: (gameData.player.coins || 0) + (gameData.player2?.coins || 0),
+            // Общий опыт (сумма опыта обоих игроков)
+            sharedXP: (gameData.player.xp || 0) + (gameData.player2?.xp || 0)
+        } : null,
         friends: gameData.friends || []
     };
     
-    if (gameData.gameMode === 'competition' && gameData.player2) {
-        dataToSave.player2 = gameData.player2;
+    try {
+        localStorage.setItem('ochivki_game_data', JSON.stringify(dataToSave));
+        console.log('Game data saved successfully', {
+            mode: dataToSave.gameMode,
+            playerXP: dataToSave.player.xp,
+            playerCoins: dataToSave.player.coins,
+            player2XP: dataToSave.player2?.xp,
+            player2Coins: dataToSave.player2?.coins,
+            reportsCount: dataToSave.reports.length,
+            sharedBossesCount: dataToSave.sharedBosses.length,
+            sharedDamage: dataToSave.sharedData?.sharedDamage
+        });
+    } catch (e) {
+        console.error('Error saving game data:', e);
+        alert('Ошибка сохранения данных! Проверьте, разрешен ли доступ к localStorage.');
+    }
+}
+
+// Получение общих достижений (объединение достижений обоих игроков)
+function getSharedAchievements() {
+    if (gameData.gameMode !== 'competition' || !gameData.player2) {
+        return gameData.player.completedAchievements || [];
     }
     
-    localStorage.setItem('ochivki_game_data', JSON.stringify(dataToSave));
+    const player1Achievements = gameData.player.completedAchievements || [];
+    const player2Achievements = gameData.player2.completedAchievements || [];
+    
+    // Объединяем достижения, убирая дубликаты
+    const sharedMap = new Map();
+    
+    player1Achievements.forEach(ach => {
+        sharedMap.set(ach.id, {
+            ...ach,
+            completedBy: 'player1',
+            completedAt: ach.timestamp || ach.date
+        });
+    });
+    
+    player2Achievements.forEach(ach => {
+        const existing = sharedMap.get(ach.id);
+        if (existing) {
+            // Если оба выполнили, отмечаем как общее
+            existing.completedBy = 'both';
+            // Берем более раннюю дату
+            const existingDate = new Date(existing.completedAt);
+            const newDate = new Date(ach.timestamp || ach.date);
+            if (newDate < existingDate) {
+                existing.completedAt = ach.timestamp || ach.date;
+            }
+        } else {
+            sharedMap.set(ach.id, {
+                ...ach,
+                completedBy: 'player2',
+                completedAt: ach.timestamp || ach.date
+            });
+        }
+    });
+    
+    return Array.from(sharedMap.values());
 }
 
 // Получение текущего игрока
 function getCurrentPlayer() {
-    if (gameData.gameMode === 'competition') {
-        return gameData.currentPlayerId === 'player1' ? gameData.player : gameData.player2;
-    }
+    // В режиме соревнования каждый игрок управляет только своим аккаунтом
+    // player1 всегда управляет gameData.player, player2 управляет gameData.player2
+    // Но так как это локальное хранилище, каждый видит только свои данные
+    // Для режима соревнования всегда возвращаем player (свой аккаунт)
     return gameData.player;
 }
 
@@ -576,6 +799,21 @@ function setupEventListeners() {
     
     // Инициализация первой вкладки (Бой)
     switchTab('combat');
+    
+    // Обработчики для гайда
+    const tutorialNextBtn = document.getElementById('tutorialNextBtn');
+    const tutorialPrevBtn = document.getElementById('tutorialPrevBtn');
+    const tutorialSkipBtn = document.getElementById('tutorialSkipBtn');
+    
+    if (tutorialNextBtn) {
+        tutorialNextBtn.addEventListener('click', nextTutorialStep);
+    }
+    if (tutorialPrevBtn) {
+        tutorialPrevBtn.addEventListener('click', prevTutorialStep);
+    }
+    if (tutorialSkipBtn) {
+        tutorialSkipBtn.addEventListener('click', skipTutorial);
+    }
     
     // Модальное окно
     const modal = document.getElementById('achievementModal');
@@ -956,40 +1194,11 @@ function selectGameMode(mode) {
             gameData.sharedBosses = [];
         }
         
-        // Создаем второго игрока если его нет
-        if (!gameData.player2) {
-            gameData.player2 = {
-                name: `Партнер (${gameData.partnerId})`,
-                level: 1,
-                xp: 0,
-                coins: 0,
-                hairColor: '#FFD700',
-                clothesColor: '#e91e63',
-                accessories: [],
-                completedAchievements: [],
-                defeatedBosses: [],
-                unlockedLocations: ['forest'],
-                stats: {
-                    attack: 25,
-                    defense: 10,
-                    health: 100,
-                    maxHealth: 100,
-                    crit: 5
-                },
-                equipment: {
-                    weapon: null,
-                    helmet: null,
-                    armor: null,
-                    boots: null,
-                    accessory: null
-                },
-                inventory: [],
-                currentEnemy: null,
-                currentEnemyHp: null,
-                accumulatedDamage: 0
-            };
-        }
-        gameData.currentPlayerId = 'player1';
+        // В режиме соревнования каждый игрок управляет только своим аккаунтом
+        // player2 используется только для хранения данных партнера (если нужно)
+        // Но управление доступно только для своего аккаунта (player)
+        // Общение происходит через отчеты
+        gameData.currentPlayerId = 'player1'; // Всегда свой аккаунт
     } else {
         // Одиночный режим - удаляем второго игрока
         gameData.player2 = null;
@@ -1027,30 +1236,12 @@ function selectGameMode(mode) {
     updatePlayerStats();
 }
 
-// Переключение между игроками в режиме соревнования
+// Переключение между игроками отключено в режиме соревнования
+// Каждый игрок управляет только своим аккаунтом
 function switchPlayer(playerId) {
-    if (gameData.gameMode !== 'competition') return;
-    
-    gameData.currentPlayerId = playerId;
-    
-    // Обновляем кнопки выбора
-    document.querySelectorAll('.player-btn').forEach(btn => btn.classList.remove('active'));
-    const btnId = playerId === 'player1' ? 'selectPlayer1' : 'selectPlayer2';
-    const btn = document.getElementById(btnId);
-    if (btn) btn.classList.add('active');
-    
-    // Обновляем имя в поле ввода
-    const nameInput = document.getElementById('playerNameInput');
-    if (nameInput) {
-        nameInput.value = getCurrentPlayer().name;
-    }
-    
-    updatePlayerStats();
-    renderAchievements();
-    renderCharacter();
-    renderCombat();
-    renderBosses(); // Обновляем боссов (они общие, но могут быть разные уровни игроков)
-    saveGameData();
+    // Функция отключена - каждый игрок видит только свои данные
+    // В режиме соревнования можно обмениваться только сообщениями через отчеты
+    showNotification('В режиме соревнования вы управляете только своим аккаунтом. Общайтесь с партнером через отчеты!');
 }
 
 // Обновление интерфейса в зависимости от режима игры
@@ -1152,9 +1343,20 @@ function updatePlayerStats() {
     const totalStats = calculateTotalStats(player);
     
     document.getElementById('playerLevel').textContent = player.level;
-    document.getElementById('playerXP').textContent = player.xp;
-    document.getElementById('playerXPNeeded').textContent = getXPNeeded(player.level);
-    document.getElementById('playerCoins').textContent = player.coins;
+    // В режиме дуо показываем общий прогресс
+    if (gameData.gameMode === 'competition' && gameData.player2) {
+        const sharedDamage = (gameData.player.accumulatedDamage || 0) + (gameData.player2.accumulatedDamage || 0);
+        const sharedCoins = (gameData.player.coins || 0) + (gameData.player2.coins || 0);
+        const sharedXP = (gameData.player.xp || 0) + (gameData.player2.xp || 0);
+        
+        document.getElementById('playerXP').textContent = `${player.xp} (общий: ${sharedXP})`;
+        document.getElementById('playerXPNeeded').textContent = getXPNeeded(player.level);
+        document.getElementById('playerCoins').textContent = `${player.coins} (общий: ${sharedCoins})`;
+    } else {
+        document.getElementById('playerXP').textContent = player.xp;
+        document.getElementById('playerXPNeeded').textContent = getXPNeeded(player.level);
+        document.getElementById('playerCoins').textContent = player.coins;
+    }
     document.getElementById('characterName').textContent = player.name;
     
     // Обновляем поле ввода имени
@@ -2006,11 +2208,22 @@ function confirmAchievement() {
     renderAchievements();
     renderCombat(); // Обновляем интерфейс боя для показа накопленного урона
     updatePlayerStats(); // Обновляем статы
-    saveGameData();
     
-    // Уведомление
-    const critText = isCrit ? ' 💥 КРИТ!' : '';
-    showNotification(`✅ Достижение "${achievement.name}" выполнено! Накоплено ${finalDamage} урона${critText} (всего: ${player.accumulatedDamage})! +${rewards.xp} опыта, +${rewards.coins} монет`);
+    // В режиме дуо показываем общий прогресс
+    if (gameData.gameMode === 'competition' && gameData.player2) {
+        const sharedDamage = (gameData.player.accumulatedDamage || 0) + (gameData.player2.accumulatedDamage || 0);
+        const sharedCoins = (gameData.player.coins || 0) + (gameData.player2.coins || 0);
+        const sharedXP = (gameData.player.xp || 0) + (gameData.player2.xp || 0);
+        
+        saveGameData(); // Сохраняем с общими данными
+        
+        const critText = isCrit ? ' 💥 КРИТ!' : '';
+        showNotification(`✅ Достижение "${achievement.name}" выполнено! Накоплено ${finalDamage} урона${critText} (ваш урон: ${player.accumulatedDamage}, общий с партнером: ${sharedDamage})! +${rewards.xp} опыта, +${rewards.coins} монет (общий опыт: ${sharedXP}, общие монеты: ${sharedCoins})`);
+    } else {
+        saveGameData();
+        const critText = isCrit ? ' 💥 КРИТ!' : '';
+        showNotification(`✅ Достижение "${achievement.name}" выполнено! Накоплено ${finalDamage} урона${critText} (всего: ${player.accumulatedDamage})! +${rewards.xp} опыта, +${rewards.coins} монет`);
+    }
     
     console.log('Achievement completed:', {
         achievement: achievement.name,
@@ -2127,6 +2340,9 @@ function renderCharacter() {
     
     // Рендерим список друзей
     renderFriends();
+    
+    // Обновляем отображение режима игры
+    updateGameModeDisplay();
     
     // Инициализируем кастомизацию если её нет
     if (!player.customization) {
@@ -2293,15 +2509,16 @@ function drawCharacterOnCanvas(ctx, cust, width, height) {
         }
     }
     
-    // Голова (овальная форма)
+    // Голова (более круглая и человечная форма)
     ctx.fillStyle = cust.face.skinColor || '#FDBCB4';
     const headCenterX = 100;
-    const headCenterY = 80;
-    const headRadiusX = 30;
-    const headRadiusY = 60;
+    const headCenterY = 90; // Сместили центр немного ниже для более естественного вида
+    const headRadiusX = 35; // Увеличили радиус по X для более круглой формы
+    const headRadiusY = 50; // Уменьшили радиус по Y для более пропорциональной формы
     
-    for (let y = 20; y < 140; y++) {
-        for (let x = 70; x < 130; x++) {
+    // Рисуем круглую голову
+    for (let y = 30; y < 150; y++) {
+        for (let x = 60; x < 140; x++) {
             const dx = (x - headCenterX) / headRadiusX;
             const dy = (y - headCenterY) / headRadiusY;
             if (dx * dx + dy * dy < 1) {
@@ -2310,116 +2527,123 @@ function drawCharacterOnCanvas(ctx, cust, width, height) {
         }
     }
     
-    // Волосы (под лицом, но поверх головы)
-    ctx.fillStyle = cust.hair.color || '#8B4513';
-    drawHair(ctx, pixel, cust.hair.style || 'short', 100, 80);
-    
-    // Брови
-    ctx.fillStyle = '#2c3e50';
-    drawEyebrows(ctx, pixel, cust.face.eyebrowType || 'normal', 100, 80);
-    
-    // Глаза
-    ctx.fillStyle = cust.face.eyeColor || '#4A90E2';
-    drawEyes(ctx, pixel, cust.face.eyeType || 'normal', 100, 80);
-    
-    // Нос
+    // Шея
     ctx.fillStyle = cust.face.skinColor || '#FDBCB4';
-    drawNose(ctx, pixel, cust.face.noseType || 'normal', 100, 80);
+    fillArea(90, 150, 110, 160);
     
-    // Рот
+    // Волосы (рисуются поверх головы, но под элементами лица)
+    ctx.fillStyle = cust.hair.color || '#8B4513';
+    drawHair(ctx, pixel, cust.hair.style || 'short', headCenterX, headCenterY);
+    
+    // Брови (выше глаз, не накладываются)
+    ctx.fillStyle = '#2c3e50';
+    drawEyebrows(ctx, pixel, cust.face.eyebrowType || 'normal', headCenterX, headCenterY);
+    
+    // Глаза (посередине лица, не накладываются на брови)
+    ctx.fillStyle = cust.face.eyeColor || '#4A90E2';
+    drawEyes(ctx, pixel, cust.face.eyeType || 'normal', headCenterX, headCenterY);
+    
+    // Нос (между глазами и ртом, не накладывается)
+    ctx.fillStyle = cust.face.skinColor || '#FDBCB4';
+    drawNose(ctx, pixel, cust.face.noseType || 'normal', headCenterX, headCenterY);
+    
+    // Рот (ниже носа, не накладывается)
     ctx.fillStyle = '#8B0000';
-    drawMouth(ctx, pixel, cust.face.mouthType || 'smile', 100, 80);
+    drawMouth(ctx, pixel, cust.face.mouthType || 'smile', headCenterX, headCenterY);
 }
 
 // Рисование волос
 function drawHair(ctx, pixel, style, centerX, centerY) {
     const hairColor = ctx.fillStyle;
+    const headRadiusX = 35;
+    const headRadiusY = 50;
     
     if (style === 'short') {
-        // Короткие волосы
-        for (let y = 25; y < 100; y++) {
-            for (let x = 75; x < 125; x++) {
-                const dx = (x - centerX) / 25;
-                const dy = (y - centerY + 20) / 40;
-                if (dx * dx + dy * dy < 1 && y < 95) {
+        // Короткие волосы - рисуются поверх головы, но не закрывают лицо
+        for (let y = 30; y < 110; y++) {
+            for (let x = 60; x < 140; x++) {
+                const dx = (x - centerX) / (headRadiusX + 3);
+                const dy = (y - centerY) / (headRadiusY + 5);
+                // Волосы только сверху и по бокам, не закрывают лицо
+                if (dx * dx + dy * dy < 1 && y < 105 && (y < 70 || Math.abs(x - centerX) > 20)) {
                     pixel(x, y, 1);
                 }
             }
         }
     } else if (style === 'medium') {
         // Средние волосы
-        for (let y = 25; y < 120; y++) {
-            for (let x = 75; x < 125; x++) {
-                const dx = (x - centerX) / 25;
-                const dy = (y - centerY + 20) / 50;
-                if (dx * dx + dy * dy < 1 && y < 115) {
+        for (let y = 30; y < 130; y++) {
+            for (let x = 60; x < 140; x++) {
+                const dx = (x - centerX) / (headRadiusX + 3);
+                const dy = (y - centerY) / (headRadiusY + 8);
+                if (dx * dx + dy * dy < 1 && y < 125 && (y < 70 || Math.abs(x - centerX) > 20)) {
                     pixel(x, y, 1);
                 }
             }
         }
     } else if (style === 'long') {
         // Длинные волосы
-        for (let y = 25; y < 140; y++) {
-            for (let x = 75; x < 125; x++) {
-                const dx = (x - centerX) / 25;
-                const dy = (y - centerY + 20) / 60;
-                if (dx * dx + dy * dy < 1 && y < 135) {
+        for (let y = 30; y < 150; y++) {
+            for (let x = 60; x < 140; x++) {
+                const dx = (x - centerX) / (headRadiusX + 3);
+                const dy = (y - centerY) / (headRadiusY + 10);
+                if (dx * dx + dy * dy < 1 && y < 145 && (y < 70 || Math.abs(x - centerX) > 20)) {
                     pixel(x, y, 1);
                 }
             }
         }
     } else if (style === 'ponytail') {
-        // Хвост
-        for (let y = 25; y < 100; y++) {
-            for (let x = 75; x < 125; x++) {
-                const dx = (x - centerX) / 25;
-                const dy = (y - centerY + 20) / 40;
-                if (dx * dx + dy * dy < 1 && y < 95) {
+        // Хвост - короткие волосы сверху
+        for (let y = 30; y < 110; y++) {
+            for (let x = 60; x < 140; x++) {
+                const dx = (x - centerX) / (headRadiusX + 3);
+                const dy = (y - centerY) / (headRadiusY + 5);
+                if (dx * dx + dy * dy < 1 && y < 105 && (y < 70 || Math.abs(x - centerX) > 20)) {
                     pixel(x, y, 1);
                 }
             }
         }
         // Хвост сзади
-        for (let y = 100; y < 140; y++) {
+        for (let y = 110; y < 150; y++) {
             for (let x = 95; x < 105; x++) {
                 pixel(x, y, 1);
             }
         }
     } else if (style === 'bun') {
-        // Пучок
-        for (let y = 25; y < 100; y++) {
-            for (let x = 75; x < 125; x++) {
-                const dx = (x - centerX) / 25;
-                const dy = (y - centerY + 20) / 40;
-                if (dx * dx + dy * dy < 1 && y < 95) {
+        // Пучок - короткие волосы
+        for (let y = 30; y < 110; y++) {
+            for (let x = 60; x < 140; x++) {
+                const dx = (x - centerX) / (headRadiusX + 3);
+                const dy = (y - centerY) / (headRadiusY + 5);
+                if (dx * dx + dy * dy < 1 && y < 105 && (y < 70 || Math.abs(x - centerX) > 20)) {
                     pixel(x, y, 1);
                 }
             }
         }
         // Пучок сверху
-        for (let y = 20; y < 35; y++) {
+        for (let y = 25; y < 40; y++) {
             for (let x = 90; x < 110; x++) {
                 const dx = (x - centerX) / 10;
-                const dy = (y - 27) / 7;
+                const dy = (y - 32) / 7;
                 if (dx * dx + dy * dy < 1) {
                     pixel(x, y, 1);
                 }
             }
         }
     } else if (style === 'mohawk') {
-        // Ирокез
-        for (let y = 25; y < 100; y++) {
+        // Ирокез - только по центру
+        for (let y = 30; y < 110; y++) {
             for (let x = 95; x < 105; x++) {
                 pixel(x, y, 1);
             }
         }
     } else if (style === 'afro') {
-        // Афро
-        for (let y = 25; y < 100; y++) {
-            for (let x = 70; x < 130; x++) {
-                const dx = (x - centerX) / 30;
-                const dy = (y - centerY + 20) / 40;
-                if (dx * dx + dy * dy < 1.2 && y < 95) {
+        // Афро - большая круглая форма
+        for (let y = 25; y < 115; y++) {
+            for (let x = 55; x < 145; x++) {
+                const dx = (x - centerX) / (headRadiusX + 8);
+                const dy = (y - centerY) / (headRadiusY + 8);
+                if (dx * dx + dy * dy < 1.1 && y < 110 && (y < 70 || Math.abs(x - centerX) > 25)) {
                     pixel(x, y, 1);
                 }
             }
@@ -2428,136 +2652,164 @@ function drawHair(ctx, pixel, style, centerX, centerY) {
     // bald - просто не рисуем волосы
 }
 
-// Рисование бровей
+// Рисование бровей (выше глаз, не накладываются)
 function drawEyebrows(ctx, pixel, type, centerX, centerY) {
+    const browY = centerY - 25; // Брови выше центра лица
+    const leftBrowStartX = centerX - 18;
+    const leftBrowEndX = centerX - 5;
+    const rightBrowStartX = centerX + 5;
+    const rightBrowEndX = centerX + 18;
+    
     if (type === 'normal') {
         // Обычные брови
-        for (let x = 85; x < 100; x++) pixel(x, 60, 1);
-        for (let x = 100; x < 115; x++) pixel(x, 60, 1);
+        for (let x = leftBrowStartX; x < leftBrowEndX; x++) pixel(x, browY, 1);
+        for (let x = rightBrowStartX; x < rightBrowEndX; x++) pixel(x, browY, 1);
     } else if (type === 'thick') {
         // Толстые брови
-        for (let x = 85; x < 100; x++) {
-            pixel(x, 59, 1);
-            pixel(x, 60, 1);
+        for (let x = leftBrowStartX; x < leftBrowEndX; x++) {
+            pixel(x, browY - 1, 1);
+            pixel(x, browY, 1);
         }
-        for (let x = 100; x < 115; x++) {
-            pixel(x, 59, 1);
-            pixel(x, 60, 1);
+        for (let x = rightBrowStartX; x < rightBrowEndX; x++) {
+            pixel(x, browY - 1, 1);
+            pixel(x, browY, 1);
         }
     } else if (type === 'thin') {
         // Тонкие брови
-        for (let x = 88; x < 97; x++) pixel(x, 60, 1);
-        for (let x = 103; x < 112; x++) pixel(x, 60, 1);
+        for (let x = leftBrowStartX + 3; x < leftBrowEndX - 3; x++) pixel(x, browY, 1);
+        for (let x = rightBrowStartX + 3; x < rightBrowEndX - 3; x++) pixel(x, browY, 1);
     } else if (type === 'angry') {
-        // Сердитые брови
-        for (let x = 85; x < 100; x++) pixel(x, 58, 1);
-        for (let x = 100; x < 115; x++) pixel(x, 58, 1);
+        // Сердитые брови (наклоненные вниз)
+        for (let x = leftBrowStartX; x < leftBrowEndX; x++) {
+            const offset = Math.floor((x - leftBrowStartX) * 0.3);
+            pixel(x, browY - offset, 1);
+        }
+        for (let x = rightBrowStartX; x < rightBrowEndX; x++) {
+            const offset = Math.floor((rightBrowEndX - x) * 0.3);
+            pixel(x, browY - offset, 1);
+        }
     }
 }
 
-// Рисование глаз
+// Рисование глаз (посередине лица, ниже бровей, не накладываются)
 function drawEyes(ctx, pixel, type, centerX, centerY) {
     const eyeColor = ctx.fillStyle;
+    const eyeY = centerY - 5; // Глаза немного выше центра лица
+    const leftEyeX = centerX - 12;
+    const rightEyeX = centerX + 12;
+    const eyeSize = 6; // Размер глаза
     
     if (type === 'normal' || type === 'big') {
         // Обычные/большие глаза
-        const size = type === 'big' ? 2 : 1;
+        const size = type === 'big' ? eyeSize + 2 : eyeSize;
         // Левый глаз
-        for (let x = 88; x < 95; x++) {
-            for (let y = 68; y < 75; y++) {
-                pixel(x, y, size);
+        for (let x = leftEyeX - size/2; x < leftEyeX + size/2; x++) {
+            for (let y = eyeY - size/2; y < eyeY + size/2; y++) {
+                pixel(x, y, 1);
             }
         }
         // Правый глаз
-        for (let x = 105; x < 112; x++) {
-            for (let y = 68; y < 75; y++) {
-                pixel(x, y, size);
+        for (let x = rightEyeX - size/2; x < rightEyeX + size/2; x++) {
+            for (let y = eyeY - size/2; y < eyeY + size/2; y++) {
+                pixel(x, y, 1);
             }
         }
         // Зрачки
         ctx.fillStyle = '#000';
-        pixel(91, 71, 1);
-        pixel(108, 71, 1);
+        pixel(leftEyeX, eyeY, 1);
+        pixel(rightEyeX, eyeY, 1);
         ctx.fillStyle = eyeColor;
     } else if (type === 'small') {
         // Маленькие глаза
-        for (let x = 90; x < 93; x++) {
-            for (let y = 69; y < 72; y++) {
+        const smallSize = eyeSize - 2;
+        for (let x = leftEyeX - smallSize/2; x < leftEyeX + smallSize/2; x++) {
+            for (let y = eyeY - smallSize/2; y < eyeY + smallSize/2; y++) {
                 pixel(x, y, 1);
             }
         }
-        for (let x = 107; x < 110; x++) {
-            for (let y = 69; y < 72; y++) {
+        for (let x = rightEyeX - smallSize/2; x < rightEyeX + smallSize/2; x++) {
+            for (let y = eyeY - smallSize/2; y < eyeY + smallSize/2; y++) {
                 pixel(x, y, 1);
             }
         }
         ctx.fillStyle = '#000';
-        pixel(91, 70, 1);
-        pixel(108, 70, 1);
+        pixel(leftEyeX, eyeY, 1);
+        pixel(rightEyeX, eyeY, 1);
         ctx.fillStyle = eyeColor;
     } else if (type === 'closed') {
-        // Закрытые глаза
-        for (let x = 88; x < 95; x++) pixel(x, 71, 1);
-        for (let x = 105; x < 112; x++) pixel(x, 71, 1);
+        // Закрытые глаза (линия)
+        for (let x = leftEyeX - eyeSize/2; x < leftEyeX + eyeSize/2; x++) pixel(x, eyeY, 1);
+        for (let x = rightEyeX - eyeSize/2; x < rightEyeX + eyeSize/2; x++) pixel(x, eyeY, 1);
     } else if (type === 'wink') {
-        // Подмигивание
-        // Левый глаз закрыт
-        for (let x = 88; x < 95; x++) pixel(x, 71, 1);
+        // Подмигивание - левый глаз закрыт, правый открыт
+        for (let x = leftEyeX - eyeSize/2; x < leftEyeX + eyeSize/2; x++) pixel(x, eyeY, 1);
         // Правый глаз открыт
-        for (let x = 105; x < 112; x++) {
-            for (let y = 68; y < 75; y++) {
+        for (let x = rightEyeX - eyeSize/2; x < rightEyeX + eyeSize/2; x++) {
+            for (let y = eyeY - eyeSize/2; y < eyeY + eyeSize/2; y++) {
                 pixel(x, y, 1);
             }
         }
         ctx.fillStyle = '#000';
-        pixel(108, 71, 1);
+        pixel(rightEyeX, eyeY, 1);
         ctx.fillStyle = eyeColor;
     }
 }
 
-// Рисование носа
+// Рисование носа (между глазами и ртом, не накладывается)
 function drawNose(ctx, pixel, type, centerX, centerY) {
+    const noseY = centerY + 10; // Нос ниже центра лица
+    const noseX = centerX;
+    
     if (type === 'normal') {
-        // Обычный нос
-        pixel(98, 80, 1);
-        pixel(102, 80, 1);
-        pixel(100, 82, 1);
+        // Обычный нос - две ноздри и кончик
+        pixel(noseX - 2, noseY, 1);
+        pixel(noseX + 2, noseY, 1);
+        pixel(noseX, noseY + 2, 1);
     } else if (type === 'small') {
-        // Маленький нос
-        pixel(100, 80, 1);
+        // Маленький нос - только кончик
+        pixel(noseX, noseY + 1, 1);
     } else if (type === 'big') {
-        // Большой нос
-        pixel(97, 79, 1);
-        pixel(103, 79, 1);
-        pixel(98, 81, 1);
-        pixel(102, 81, 1);
-        pixel(100, 83, 1);
+        // Большой нос - более выраженный
+        pixel(noseX - 3, noseY - 1, 1);
+        pixel(noseX + 3, noseY - 1, 1);
+        pixel(noseX - 2, noseY, 1);
+        pixel(noseX + 2, noseY, 1);
+        pixel(noseX, noseY + 3, 1);
     }
 }
 
-// Рисование рта
+// Рисование рта (ниже носа, не накладывается)
 function drawMouth(ctx, pixel, type, centerX, centerY) {
+    const mouthY = centerY + 25; // Рот ниже центра лица, под носом
+    const mouthX = centerX;
+    
     if (type === 'smile') {
-        // Улыбка
-        for (let x = 95; x < 105; x++) {
-            const y = 88 + Math.floor(Math.sin((x - 100) * 0.3) * 2);
-            pixel(x, y, 1);
+        // Улыбка - изогнутая линия вверх
+        for (let x = mouthX - 8; x < mouthX + 8; x++) {
+            const offset = Math.floor(Math.sin((x - mouthX) * 0.2) * 2);
+            pixel(x, mouthY - offset, 1);
         }
     } else if (type === 'neutral') {
-        // Нейтральный
-        for (let x = 96; x < 104; x++) pixel(x, 88, 1);
+        // Нейтральный - прямая линия
+        for (let x = mouthX - 6; x < mouthX + 6; x++) {
+            pixel(x, mouthY, 1);
+        }
     } else if (type === 'open') {
-        // Открытый рот
-        for (let x = 96; x < 104; x++) {
-            pixel(x, 87, 1);
-            pixel(x, 88, 1);
-            pixel(x, 89, 1);
+        // Открытый рот - овал
+        for (let x = mouthX - 5; x < mouthX + 5; x++) {
+            for (let y = mouthY - 2; y < mouthY + 2; y++) {
+                const dx = (x - mouthX) / 5;
+                const dy = (y - mouthY) / 2;
+                if (dx * dx + dy * dy < 1) {
+                    pixel(x, y, 1);
+                }
+            }
         }
     } else if (type === 'bigSmile') {
-        // Широкая улыбка
-        for (let x = 93; x < 107; x++) {
-            const y = 88 + Math.floor(Math.sin((x - 100) * 0.25) * 3);
-            pixel(x, y, 1);
+        // Широкая улыбка - большая изогнутая линия
+        for (let x = mouthX - 12; x < mouthX + 12; x++) {
+            const offset = Math.floor(Math.sin((x - mouthX) * 0.15) * 3);
+            pixel(x, mouthY - offset, 1);
         }
     }
 }
@@ -3147,9 +3399,12 @@ function renderReports() {
         const reportCard = document.createElement('div');
         reportCard.className = `report-card ${report.status || 'pending'}`;
         
-        const isCurrentPlayer = report.playerId === gameData.currentPlayerId;
+        // В режиме соревнования определяем, от кого отчет
+        // playerId === 'player1' означает свой отчет, иначе - от партнера
+        const isOwnReport = report.playerId === 'player1';
         const isCompetition = gameData.gameMode === 'competition';
-        const canReview = isCompetition && !isCurrentPlayer && report.status === 'pending';
+        // Можем проверять только отчеты партнера (не свои)
+        const canReview = isCompetition && !isOwnReport && report.status === 'pending';
         
         let statusBadge = '';
         if (isCompetition) {
@@ -3164,10 +3419,23 @@ function renderReports() {
             statusBadge = '<span class="status-badge archived">📁 В архиве</span>';
         }
         
+        // Определяем имя отправителя
+        let senderName = report.playerName || 'Неизвестно';
+        let senderInfo = '';
+        if (isCompetition) {
+            if (isOwnReport) {
+                senderName = 'Вы';
+                senderInfo = '<span style="color: #667eea; font-weight: bold;">(Ваш отчет)</span>';
+            } else {
+                senderName = `Партнер (${gameData.partnerId || 'ID'})`;
+                senderInfo = '<span style="color: #e74c3c; font-weight: bold;">(От партнера)</span>';
+            }
+        }
+        
         reportCard.innerHTML = `
             <div class="report-header">
                 <div class="report-author">
-                    <strong>${report.playerName}</strong>
+                    <strong>${senderName}</strong> ${senderInfo}
                     <span class="report-time">${new Date(report.timestamp).toLocaleString('ru-RU')}</span>
                 </div>
                 ${statusBadge}
@@ -3186,15 +3454,26 @@ function renderReports() {
                     <button class="btn-danger" onclick="rejectReport('${report.id}')">❌ Отклонить</button>
                 </div>
             ` : ''}
+            ${isOwnReport && isPending ? `
+                <div class="report-info" style="padding: 10px; background: #e8f4f8; border-radius: 5px; margin-top: 10px;">
+                    <p style="margin: 0; color: #2c3e50;">⏳ Ваш отчет ожидает проверки партнером</p>
+                </div>
+            ` : ''}
             ${report.rejectionReason ? `
                 <div class="rejection-reason-box">
                     <strong>❌ Причина отклонения:</strong>
                     <p>${report.rejectionReason}</p>
+                    ${isOwnReport && report.status === 'rejected' ? `
+                        <div class="report-actions" style="margin-top: 10px;">
+                            <button class="btn-primary" onclick="restartAchievement('${report.achievementId}')">🔄 Переделать</button>
+                            <button class="btn-secondary" onclick="cancelAchievement('${report.achievementId}')">❌ Отказаться</button>
+                        </div>
+                    ` : ''}
                 </div>
             ` : ''}
             ${report.reviewedBy && isCompetition ? `
                 <div class="report-review-info">
-                    Проверено: ${report.reviewedBy === 'player1' ? gameData.player.name : (gameData.player2 ? gameData.player2.name : 'Партнер')}
+                    Проверено: ${report.reviewedBy === 'player1' ? 'Вы' : 'Партнер'}
                 </div>
             ` : ''}
         `;
@@ -3302,8 +3581,9 @@ function createReport(achievement, photoData) {
         }
         
         // Удаляем старые отклоненные отчеты для этого достижения
+        // В режиме соревнования playerId всегда 'player1' (свой аккаунт)
         gameData.reports = gameData.reports.filter(r => 
-            !(r.achievementId === achievement.id && r.playerId === gameData.currentPlayerId && r.status === 'rejected')
+            !(r.achievementId === achievement.id && r.playerId === 'player1' && r.status === 'rejected')
         );
         
         // Обновляем статус в процессе выполнения
@@ -3315,7 +3595,7 @@ function createReport(achievement, photoData) {
     
     const report = {
         id: `report_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        playerId: gameData.currentPlayerId,
+        playerId: 'player1', // Всегда свой аккаунт
         playerName: player.name,
         achievementId: achievement.id,
         achievementName: achievement.name,
@@ -3341,7 +3621,7 @@ function createReport(achievement, photoData) {
     if (preview) preview.innerHTML = '';
     
     if (gameData.gameMode === 'competition') {
-        showNotification('📤 Отчет отправлен партнеру на проверку!');
+        showNotification('📤 Отчет отправлен партнеру на проверку! Партнер увидит его в разделе "Отчеты"');
     } else {
         showNotification('📁 Отчет добавлен в архив!');
     }
@@ -3352,11 +3632,23 @@ function approveReport(reportId) {
     const report = gameData.reports.find(r => r.id === reportId);
     if (!report) return;
     
-    report.status = 'approved';
-    report.reviewedBy = gameData.currentPlayerId;
+    // Проверяем, что это отчет партнера (не свой)
+    if (report.playerId === 'player1') {
+        showNotification('Нельзя одобрить свой собственный отчет!');
+        return;
+    }
     
-    // Начисляем награды игроку, который выполнил достижение
-    const targetPlayer = report.playerId === 'player1' ? gameData.player : gameData.player2;
+    report.status = 'approved';
+    report.reviewedBy = 'player1'; // Вы одобрили отчет партнера
+    
+    // В режиме соревнования:
+    // - Отчеты партнера видны вам, вы можете их одобрять/отклонять
+    // - Награды начисляются партнеру в его аккаунте (локально у него)
+    // - Здесь мы просто отмечаем отчет как одобренный для отображения
+    // - Партнер увидит одобрение в своем аккаунте и получит награды
+    
+    // Для отображения используем свой аккаунт
+    const targetPlayer = gameData.player;
     
     if (!targetPlayer) {
         console.error('Target player not found');
@@ -3380,79 +3672,19 @@ function approveReport(reportId) {
         return;
     }
     
-    // Сохраняем текущего игрока
-    const currentPlayer = getCurrentPlayer();
-    const wasCurrentPlayer = currentPlayer === targetPlayer;
-    const oldPlayerId = gameData.currentPlayerId;
+    // В режиме соревнования:
+    // - Награды начисляются партнеру в его аккаунте (локально у него)
+    // - Здесь мы просто отмечаем отчет как одобренный для отображения
+    // - Партнер получит награды когда откроет свой аккаунт
+    // - Мы НЕ начисляем награды себе за одобрение чужого отчета
     
-    // Временно переключаемся на игрока для начисления наград
-    gameData.currentPlayerId = report.playerId;
-    
-    // Добавляем опыт
-    addXP(rewards.xp);
-    
-    // Добавляем монеты
-    if (targetPlayer.coins === undefined || targetPlayer.coins === null) {
-        targetPlayer.coins = 0;
-    }
-    targetPlayer.coins += rewards.coins;
-    
-    // Начисляем урон
-    const totalStats = calculateTotalStats(targetPlayer);
-    const baseDamage = rewards.damage;
-    const attackBonus = totalStats.attack;
-    const totalDamage = baseDamage + attackBonus;
-    const isCrit = Math.random() * 100 < totalStats.crit;
-    const finalDamage = isCrit ? Math.floor(totalDamage * 1.5) : totalDamage;
-    
-    if (targetPlayer.accumulatedDamage === undefined || targetPlayer.accumulatedDamage === null) {
-        targetPlayer.accumulatedDamage = 0;
-    }
-    targetPlayer.accumulatedDamage += finalDamage;
-    
-    // Возвращаем текущего игрока
-    gameData.currentPlayerId = oldPlayerId;
-    
-    // Отмечаем достижение как выполненное
-    if (!targetPlayer.completedAchievements) {
-        targetPlayer.completedAchievements = [];
-    }
-    
-    const timestamp = new Date().toISOString();
-    const existingIndex = targetPlayer.completedAchievements.findIndex(ca => ca.id === report.achievementId);
-    if (existingIndex >= 0) {
-        targetPlayer.completedAchievements[existingIndex] = {
-            id: report.achievementId,
-            date: new Date().toISOString().split('T')[0],
-            timestamp: timestamp,
-            difficulty: achievement.difficulty
-        };
-    } else {
-        targetPlayer.completedAchievements.push({
-            id: report.achievementId,
-            date: new Date().toISOString().split('T')[0],
-            timestamp: timestamp,
-            difficulty: achievement.difficulty
-        });
-    }
-    
-    // Удаляем из процесса выполнения
-    if (targetPlayer.inProgressAchievements) {
-        targetPlayer.inProgressAchievements = targetPlayer.inProgressAchievements.filter(
-            ipa => ipa.id !== report.achievementId
-        );
-    }
-    
-    // Обновляем интерфейс если это текущий игрок
-    if (wasCurrentPlayer) {
-        updatePlayerStats();
-        renderCombat();
-    }
+    // Отмечаем отчет как одобренный (для истории)
+    // Награды партнер получит в своем аккаунте автоматически
     
     saveGameData();
     renderReports();
     renderAchievements();
-    showNotification('✅ Отчет одобрен! Награды начислены.');
+    showNotification('✅ Отчет партнера одобрен! Партнер получит награды в своем аккаунте.');
 }
 
 // Отклонение отчета
@@ -3502,8 +3734,18 @@ function confirmRejectReport(reportId) {
     const report = gameData.reports.find(r => r.id === reportId);
     if (!report) return;
     
+    // Проверяем, что это отчет партнера (не свой)
+    if (report.playerId === 'player1') {
+        showNotification('Нельзя отклонить свой собственный отчет!');
+        const rejectModal = document.querySelector('.reject-modal')?.closest('.modal');
+        if (rejectModal) {
+            rejectModal.remove();
+        }
+        return;
+    }
+    
     report.status = 'rejected';
-    report.reviewedBy = gameData.currentPlayerId;
+    report.reviewedBy = 'player1'; // Вы отклонили отчет партнера
     report.rejectionReason = reason;
     report.rejectedAt = new Date().toISOString();
     
@@ -3723,7 +3965,13 @@ function renderCombat() {
     // Обновление накопленного урона
     const accumulatedDamageEl = document.getElementById('accumulatedDamage');
     if (accumulatedDamageEl) {
-        accumulatedDamageEl.textContent = player.accumulatedDamage || 0;
+        // В режиме дуо показываем общий урон
+        if (gameData.gameMode === 'competition' && gameData.player2) {
+            const sharedDamage = (gameData.player.accumulatedDamage || 0) + (gameData.player2.accumulatedDamage || 0);
+            accumulatedDamageEl.textContent = `${player.accumulatedDamage || 0} (общий: ${sharedDamage})`;
+        } else {
+            accumulatedDamageEl.textContent = player.accumulatedDamage || 0;
+        }
         
         // Визуальное выделение если есть урон
         if (player.accumulatedDamage > 0) {
@@ -3980,6 +4228,83 @@ window.addFriend = addFriend;
 window.removeFriend = removeFriend;
 window.playWithFriend = playWithFriend;
 window.selectFriendAsPartner = selectFriendAsPartner;
+window.switchGameMode = switchGameMode;
+
+// Переключение режима игры из личного кабинета
+function switchGameMode(newMode) {
+    if (newMode === gameData.gameMode) {
+        showNotification('Вы уже находитесь в этом режиме!');
+        return;
+    }
+    
+    if (newMode === 'competition') {
+        // Переход в режим соревнования - нужен партнер
+        if (!gameData.partnerId) {
+            showPartnerIdModal();
+            return;
+        }
+        
+        // В режиме соревнования каждый игрок управляет только своим аккаунтом
+        // player2 не нужен для управления, только для отображения данных партнера (если нужно)
+        // Общение происходит через отчеты
+        
+        // Инициализируем общих боссов если их нет
+        if (!gameData.sharedBosses || gameData.sharedBosses.length === 0) {
+            gameData.sharedBosses = gameData.bosses.map(boss => ({
+                id: boss.id,
+                isDefeated: false
+            }));
+        }
+    } else if (newMode === 'single') {
+        // Переход в одиночный режим
+        // Сохраняем данные player2 перед переходом
+        if (gameData.player2) {
+            // Данные сохраняются в localStorage
+        }
+    }
+    
+    gameData.gameMode = newMode;
+    gameData.currentPlayerId = 'player1';
+    
+    updateUIForGameMode();
+    updateGameModeDisplay();
+    saveGameData();
+    
+    showNotification(`✅ Режим изменен на: ${newMode === 'single' ? 'Одиночный' : 'Соревнование'}`);
+}
+
+// Обновление отображения режима игры
+function updateGameModeDisplay() {
+    const currentModeText = document.getElementById('currentModeText');
+    const switchToSingleBtn = document.getElementById('switchToSingleMode');
+    const switchToCompetitionBtn = document.getElementById('switchToCompetitionMode');
+    
+    if (currentModeText) {
+        const modeName = gameData.gameMode === 'single' ? 'Одиночный' : 
+                        gameData.gameMode === 'competition' ? 'Соревнование' : 'Не выбран';
+        currentModeText.textContent = modeName;
+    }
+    
+    if (switchToSingleBtn) {
+        if (gameData.gameMode === 'single') {
+            switchToSingleBtn.classList.add('active');
+            switchToSingleBtn.disabled = true;
+        } else {
+            switchToSingleBtn.classList.remove('active');
+            switchToSingleBtn.disabled = false;
+        }
+    }
+    
+    if (switchToCompetitionBtn) {
+        if (gameData.gameMode === 'competition') {
+            switchToCompetitionBtn.classList.add('active');
+            switchToCompetitionBtn.disabled = true;
+        } else {
+            switchToCompetitionBtn.classList.remove('active');
+            switchToCompetitionBtn.disabled = false;
+        }
+    }
+}
 
 // Инициализация обработчиков вкладок кастомизации после загрузки DOM
 document.addEventListener('DOMContentLoaded', () => {

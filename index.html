@@ -139,6 +139,18 @@
                                 <strong>Telegram:</strong>
                                 <div id="telegramUserName"></div>
                             </div>
+                            <div class="profile-item">
+                                <strong>Режим игры:</strong>
+                                <div class="game-mode-switcher">
+                                    <button id="switchToSingleMode" class="btn-mode-switch" onclick="switchGameMode('single')">
+                                        🎮 Одиночный
+                                    </button>
+                                    <button id="switchToCompetitionMode" class="btn-mode-switch" onclick="switchGameMode('competition')">
+                                        👥 Соревнование
+                                    </button>
+                                </div>
+                                <p class="profile-hint" id="currentModeHint">Текущий режим: <span id="currentModeText">-</span></p>
+                            </div>
                         </div>
                     </div>
                     
@@ -288,6 +300,25 @@
                     <div class="mode-title">Соревнование</div>
                     <div class="mode-desc">Соревнуйтесь с партнером</div>
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно гайда/туториала -->
+    <div id="tutorialModal" class="modal">
+        <div class="modal-content tutorial-modal">
+            <div id="tutorialContent" class="tutorial-content">
+                <!-- Контент будет заполняться через JavaScript -->
+            </div>
+            <div class="tutorial-navigation">
+                <button id="tutorialPrevBtn" class="btn-secondary" style="display: none;">← Назад</button>
+                <div class="tutorial-progress">
+                    <span id="tutorialStep">1</span> / <span id="tutorialTotal">5</span>
+                </div>
+                <div>
+                    <button id="tutorialSkipBtn" class="btn-secondary">Пропустить</button>
+                    <button id="tutorialNextBtn" class="btn-primary">Далее →</button>
+                </div>
             </div>
         </div>
     </div>
