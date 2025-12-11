@@ -1,68 +1,58 @@
 // Игровые данные
 const gameData = {
-    players: {
-        kirill: {
-            name: 'КИРИЛЛ',
-            level: 1,
-            xp: 0,
-            coins: 0,
-            hairColor: '#8B4513',
-            clothesColor: '#3498db',
-            accessories: [],
-            completedAchievements: [],
-            defeatedBosses: [],
-            unlockedLocations: ['forest'],
-            // Боевые статы
-            stats: {
-                attack: 25,
-                defense: 10,
-                health: 100,
-                maxHealth: 100,
-                crit: 5 // шанс крита в %
-            },
-            equipment: {
-                weapon: null,
-                helmet: null,
-                armor: null,
-                boots: null,
-                accessory: null
-            },
-            inventory: [],
-            currentEnemy: null,
-            accumulatedDamage: 0 // Накопленный урон за достижения
+    gameMode: null, // 'single' или 'competition'
+    player: {
+        name: 'Игрок',
+        level: 1,
+        xp: 0,
+        coins: 0,
+        hairColor: '#8B4513',
+        clothesColor: '#3498db',
+        accessories: [],
+        completedAchievements: [],
+        customAchievements: [], // Пользовательские достижения
+        defeatedBosses: [],
+        unlockedLocations: ['forest'],
+        // Боевые статы
+        stats: {
+            attack: 25,
+            defense: 10,
+            health: 100,
+            maxHealth: 100,
+            crit: 5 // шанс крита в %
         },
-        yulya: {
-            name: 'ЮЛЯ',
-            level: 1,
-            xp: 0,
-            coins: 0,
-            hairColor: '#FFD700',
-            clothesColor: '#e91e63',
-            accessories: [],
-            completedAchievements: [],
-            defeatedBosses: [],
-            unlockedLocations: ['forest'],
-            // Боевые статы
-            stats: {
-                attack: 25,
-                defense: 10,
-                health: 100,
-                maxHealth: 100,
-                crit: 5
-            },
-            equipment: {
-                weapon: null,
-                helmet: null,
-                armor: null,
-                boots: null,
-                accessory: null
-            },
-            inventory: [],
-            currentEnemy: null,
-            accumulatedDamage: 0 // Накопленный урон за достижения
-        }
+        equipment: {
+            weapon: null,
+            helmet: null,
+            armor: null,
+            boots: null,
+            accessory: null
+        },
+        inventory: [],
+        currentEnemy: null,
+        currentEnemyHp: null, // HP текущего врага (для сохранения)
+        accumulatedDamage: 0 // Накопленный урон за достижения
     },
-    currentPlayer: 'kirill',
+    player2: null, // Данные второго игрока (только в режиме соревнования)
+    currentPlayerId: 'player1', // 'player1' или 'player2' (только в режиме соревнования)
+    
+    // Общие данные для режима соревнования
+    sharedBosses: [], // Общий список побежденных боссов в режиме соревнования
+    
+    // Система отчетов/чата
+    reports: [], // Массив отчетов о достижениях
+    // Структура отчета:
+    // {
+    //   id: уникальный ID,
+    //   playerId: 'player1' или 'player2',
+    //   playerName: имя игрока,
+    //   achievementId: ID достижения,
+    //   achievementName: название достижения,
+    //   photo: base64 строка фото (или null),
+    //   timestamp: время отправки,
+    //   status: 'pending' | 'approved' | 'rejected' (только для соревнования),
+    //   reviewedBy: 'player1' или 'player2' (кто одобрил/отклонил)
+    // }
     
     achievements: [
         // Легкие достижения (5-7 очков)
@@ -81,6 +71,13 @@ const gameData = {
         // Сложные достижения (20+ очков)
         { id: 'learn_language', name: 'Полиглот', desc: 'Выучить новый язык на начальном уровне', points: 20, difficulty: 'hard' }
     ],
+    
+    // Правила начисления за достижения
+    achievementRewards: {
+        easy: { xp: 5, coins: 3, damage: 5 },
+        medium: { xp: 15, coins: 6, damage: 15 },
+        hard: { xp: 30, coins: 10, damage: 30 }
+    },
     
     shopItems: {
         chests: [
@@ -187,19 +184,38 @@ function initGame() {
     loadGameData();
     setupEventListeners();
     
+    // Проверяем, выбран ли режим игры
+    if (!gameData.gameMode) {
+        // Показываем модальное окно выбора режима
+        showGameModeSelection();
+        return; // Не продолжаем инициализацию до выбора режима
+    }
+    
+    // Обновляем интерфейс для текущего режима
+    updateUIForGameMode();
+    
     // Инициализация боя
     const player = getCurrentPlayer();
-    if (!player.currentEnemy) {
+    
+    // Восстанавливаем HP врага если есть сохраненный враг
+    if (player.currentEnemy && player.currentEnemyHp !== null && player.currentEnemyHp !== undefined) {
+        const enemy = gameData.enemies.find(e => e.id === player.currentEnemy);
+        if (enemy) {
+            enemy.hp = Math.min(player.currentEnemyHp, enemy.maxHp);
+        }
+    } else if (!player.currentEnemy) {
         startCombat();
     }
     
     renderCombat();
     renderAchievements();
+    renderReports();
     renderCharacter();
     renderEquipment();
     renderShop();
     renderBosses();
     updatePlayerStats();
+    updateUIForGameMode();
 }
 
 // Загрузка данных из localStorage
@@ -207,71 +223,173 @@ function loadGameData() {
     const saved = localStorage.getItem('ochivki_game_data');
     if (saved) {
         const parsed = JSON.parse(saved);
-        Object.assign(gameData.players, parsed.players || {});
-        gameData.currentPlayer = parsed.currentPlayer || 'kirill';
         
-        // Миграция старых данных: добавляем timestamp к старым достижениям и accumulatedDamage
-        Object.values(gameData.players).forEach(player => {
-            // Инициализация базовых полей
-            if (!player.completedAchievements) player.completedAchievements = [];
-            if (player.accumulatedDamage === undefined) player.accumulatedDamage = 0;
-            if (!player.stats) {
-                player.stats = {
-                    attack: 25,
-                    defense: 10,
-                    health: 100,
-                    maxHealth: 100,
-                    crit: 5
-                };
+        // Загружаем режим игры
+        gameData.gameMode = parsed.gameMode || null;
+        gameData.currentPlayerId = parsed.currentPlayerId || 'player1';
+        
+        // Миграция старых данных (если есть два персонажа)
+        if (parsed.players) {
+            // Старая структура - конвертируем в новый формат
+            const currentPlayerId = parsed.currentPlayer || 'kirill';
+            const oldPlayer = parsed.players[currentPlayerId] || parsed.players.kirill || parsed.players.yulya;
+            if (oldPlayer) {
+                Object.assign(gameData.player, oldPlayer);
             }
-            if (!player.equipment) {
-                player.equipment = {
-                    weapon: null,
-                    helmet: null,
-                    armor: null,
-                    boots: null,
-                    accessory: null
-                };
+            // Если есть второй игрок, сохраняем его
+            const otherPlayerId = currentPlayerId === 'kirill' ? 'yulya' : 'kirill';
+            if (parsed.players[otherPlayerId]) {
+                gameData.player2 = { ...parsed.players[otherPlayerId] };
+                gameData.gameMode = 'competition';
+            } else {
+                gameData.gameMode = 'single';
             }
-            if (!player.inventory) player.inventory = [];
-            if (player.xp === undefined) player.xp = 0;
-            if (player.level === undefined) player.level = 1;
-            if (player.coins === undefined) player.coins = 0;
-            
-            if (player.completedAchievements) {
-                player.completedAchievements = player.completedAchievements.map(ca => {
-                    if (!ca.timestamp && ca.date) {
-                        // Если нет timestamp, создаем его из даты (устанавливаем на начало дня)
-                        const date = new Date(ca.date);
-                        date.setHours(0, 0, 0, 0);
-                        ca.timestamp = date.toISOString();
-                    }
-                    return ca;
-                });
+        } else if (parsed.player) {
+            // Новая структура данных
+            Object.assign(gameData.player, parsed.player);
+            if (parsed.player2) {
+                gameData.player2 = parsed.player2;
             }
-        });
+        }
+        
+        // Загружаем отчеты
+        if (parsed.reports && Array.isArray(parsed.reports)) {
+            gameData.reports = parsed.reports;
+        } else {
+            gameData.reports = [];
+        }
+        
+        // Загружаем общих боссов для режима соревнования
+        if (parsed.sharedBosses && Array.isArray(parsed.sharedBosses)) {
+            gameData.sharedBosses = parsed.sharedBosses;
+        } else {
+            gameData.sharedBosses = [];
+        }
+        
+        // Инициализация базовых полей для первого игрока
+        initPlayerData(gameData.player);
+        
+        // Инициализация базовых полей для второго игрока (если есть)
+        if (gameData.player2) {
+            initPlayerData(gameData.player2);
+        }
+        
         saveGameData(); // Сохраняем мигрированные данные
+    }
+}
+
+// Инициализация данных игрока
+function initPlayerData(player) {
+    if (!player.name) player.name = 'Игрок';
+    if (!player.completedAchievements) player.completedAchievements = [];
+    if (!player.customAchievements) player.customAchievements = [];
+    if (player.accumulatedDamage === undefined) player.accumulatedDamage = 0;
+    if (!player.stats) {
+        player.stats = {
+            attack: 25,
+            defense: 10,
+            health: 100,
+            maxHealth: 100,
+            crit: 5
+        };
+    }
+    if (!player.equipment) {
+        player.equipment = {
+            weapon: null,
+            helmet: null,
+            armor: null,
+            boots: null,
+            accessory: null
+        };
+    }
+    if (!player.inventory) player.inventory = [];
+    if (player.xp === undefined) player.xp = 0;
+    if (player.level === undefined) player.level = 1;
+    if (player.coins === undefined) player.coins = 0;
+    if (player.currentEnemyHp === undefined) player.currentEnemyHp = null;
+    if (!player.hairColor) player.hairColor = '#8B4513';
+    if (!player.clothesColor) player.clothesColor = '#3498db';
+    if (!player.accessories) player.accessories = [];
+    if (!player.defeatedBosses) player.defeatedBosses = [];
+    if (!player.unlockedLocations) player.unlockedLocations = ['forest'];
+    
+    if (player.completedAchievements) {
+        player.completedAchievements = player.completedAchievements.map(ca => {
+            if (!ca.timestamp && ca.date) {
+                // Если нет timestamp, создаем его из даты (устанавливаем на начало дня)
+                const date = new Date(ca.date);
+                date.setHours(0, 0, 0, 0);
+                ca.timestamp = date.toISOString();
+            }
+            return ca;
+        });
     }
 }
 
 // Сохранение данных в localStorage
 function saveGameData() {
-    localStorage.setItem('ochivki_game_data', JSON.stringify({
-        players: gameData.players,
-        currentPlayer: gameData.currentPlayer
-    }));
+    const dataToSave = {
+        gameMode: gameData.gameMode,
+        player: gameData.player,
+        currentPlayerId: gameData.currentPlayerId,
+        reports: gameData.reports || [],
+        sharedBosses: gameData.sharedBosses || []
+    };
+    
+    if (gameData.gameMode === 'competition' && gameData.player2) {
+        dataToSave.player2 = gameData.player2;
+    }
+    
+    localStorage.setItem('ochivki_game_data', JSON.stringify(dataToSave));
 }
 
 // Получение текущего игрока
 function getCurrentPlayer() {
-    return gameData.players[gameData.currentPlayer];
+    if (gameData.gameMode === 'competition') {
+        return gameData.currentPlayerId === 'player1' ? gameData.player : gameData.player2;
+    }
+    return gameData.player;
 }
 
 // Настройка обработчиков событий
 function setupEventListeners() {
-    // Переключение персонажей
-    document.getElementById('selectKirill').addEventListener('click', () => switchPlayer('kirill'));
-    document.getElementById('selectYulya').addEventListener('click', () => switchPlayer('yulya'));
+    // Выбор режима игры
+    const singlePlayerModeBtn = document.getElementById('singlePlayerMode');
+    const competitionModeBtn = document.getElementById('competitionMode');
+    if (singlePlayerModeBtn) {
+        singlePlayerModeBtn.addEventListener('click', () => selectGameMode('single'));
+    }
+    if (competitionModeBtn) {
+        competitionModeBtn.addEventListener('click', () => selectGameMode('competition'));
+    }
+    
+    // Переключение между игроками в режиме соревнования
+    const selectPlayer1Btn = document.getElementById('selectPlayer1');
+    const selectPlayer2Btn = document.getElementById('selectPlayer2');
+    if (selectPlayer1Btn) {
+        selectPlayer1Btn.addEventListener('click', () => switchPlayer('player1'));
+    }
+    if (selectPlayer2Btn) {
+        selectPlayer2Btn.addEventListener('click', () => switchPlayer('player2'));
+    }
+    
+    // Изменение имени игрока
+    const nameInput = document.getElementById('playerNameInput');
+    const saveNameBtn = document.getElementById('saveNameBtn');
+    
+    if (nameInput) {
+        // Сохранение при нажатии Enter
+        nameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                savePlayerName();
+            }
+        });
+        
+        // Сохранение при клике на кнопку
+        if (saveNameBtn) {
+            saveNameBtn.addEventListener('click', savePlayerName);
+        }
+    }
     
     // Навигация по вкладкам
     document.querySelectorAll('.nav-btn').forEach(btn => {
@@ -307,32 +425,263 @@ function setupEventListeners() {
     // Модальное окно
     const modal = document.getElementById('achievementModal');
     const closeBtn = document.querySelector('.close');
-    closeBtn.addEventListener('click', () => {
-        modal.classList.remove('active');
+    if (closeBtn && modal) {
+        closeBtn.addEventListener('click', () => {
+            modal.classList.remove('active');
+        });
+    }
+    
+    const confirmAchievementBtn = document.getElementById('confirmAchievement');
+    if (confirmAchievementBtn) {
+        confirmAchievementBtn.addEventListener('click', confirmAchievement);
+    }
+    
+    // Модальное окно создания достижения
+    const createModal = document.getElementById('createAchievementModal');
+    const closeCreateBtn = document.querySelector('.close-create');
+    if (closeCreateBtn) {
+        closeCreateBtn.addEventListener('click', () => {
+            createModal.classList.remove('active');
+        });
+    }
+    
+    const addAchievementBtn = document.getElementById('addAchievementBtn');
+    if (addAchievementBtn && createModal) {
+        addAchievementBtn.addEventListener('click', () => {
+            createModal.classList.add('active');
+            // Сброс формы
+            const nameInput = document.getElementById('newAchievementName');
+            const descInput = document.getElementById('newAchievementDesc');
+            if (nameInput) nameInput.value = '';
+            if (descInput) descInput.value = '';
+            document.querySelectorAll('.difficulty-option').forEach(btn => btn.classList.remove('selected'));
+        });
+    }
+    
+    // Выбор сложности при создании достижения
+    document.querySelectorAll('.difficulty-option').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.difficulty-option').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+        });
     });
     
-    document.getElementById('confirmAchievement').addEventListener('click', confirmAchievement);
+    const createAchievementBtn = document.getElementById('createAchievementBtn');
+    if (createAchievementBtn) {
+        createAchievementBtn.addEventListener('click', createCustomAchievement);
+    }
+    
+    // Обработчики для системы отчетов
+    const reportPhotoInput = document.getElementById('reportPhotoInput');
+    if (reportPhotoInput) {
+        reportPhotoInput.addEventListener('change', handlePhotoSelect);
+    }
+    
+    const sendReportBtn = document.getElementById('sendReportBtn');
+    if (sendReportBtn) {
+        sendReportBtn.addEventListener('click', sendReport);
+    }
     
     window.addEventListener('click', (e) => {
-        if (e.target === modal) {
+        // Закрываем только модальное окно достижений, не режима игры
+        const gameModeModal = document.getElementById('gameModeModal');
+        if (e.target === modal && (!gameModeModal || !gameModeModal.classList.contains('active'))) {
             modal.classList.remove('active');
+        }
+        if (e.target === createModal) {
+            createModal.classList.remove('active');
         }
     });
 }
 
-// Переключение персонажа
+// Показать модальное окно выбора режима
+function showGameModeSelection() {
+    const modal = document.getElementById('gameModeModal');
+    if (modal) {
+        modal.classList.add('active');
+    }
+}
+
+// Выбор режима игры
+function selectGameMode(mode) {
+    gameData.gameMode = mode;
+    
+    if (mode === 'competition') {
+        // Убеждаемся, что у первого игрока есть имя
+        if (!gameData.player.name || gameData.player.name === 'Игрок') {
+            gameData.player.name = 'Игрок 1';
+        }
+        
+        // Инициализируем общий список боссов для соревнования
+        if (!gameData.sharedBosses) {
+            gameData.sharedBosses = [];
+        }
+        
+        // Создаем второго игрока если его нет
+        if (!gameData.player2) {
+            gameData.player2 = {
+                name: 'Игрок 2',
+                level: 1,
+                xp: 0,
+                coins: 0,
+                hairColor: '#FFD700',
+                clothesColor: '#e91e63',
+                accessories: [],
+                completedAchievements: [],
+                defeatedBosses: [],
+                unlockedLocations: ['forest'],
+                stats: {
+                    attack: 25,
+                    defense: 10,
+                    health: 100,
+                    maxHealth: 100,
+                    crit: 5
+                },
+                equipment: {
+                    weapon: null,
+                    helmet: null,
+                    armor: null,
+                    boots: null,
+                    accessory: null
+                },
+                inventory: [],
+                currentEnemy: null,
+                currentEnemyHp: null,
+                accumulatedDamage: 0
+            };
+        }
+        gameData.currentPlayerId = 'player1';
+    } else {
+        // Одиночный режим - удаляем второго игрока
+        gameData.player2 = null;
+        gameData.currentPlayerId = 'player1';
+    }
+    
+    // Скрываем модальное окно
+    const modal = document.getElementById('gameModeModal');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+    
+    saveGameData();
+    updateUIForGameMode();
+    
+    // Продолжаем инициализацию игры
+    const player = getCurrentPlayer();
+    
+    // Восстанавливаем HP врага если есть сохраненный враг
+    if (player.currentEnemy && player.currentEnemyHp !== null && player.currentEnemyHp !== undefined) {
+        const enemy = gameData.enemies.find(e => e.id === player.currentEnemy);
+        if (enemy) {
+            enemy.hp = Math.min(player.currentEnemyHp, enemy.maxHp);
+        }
+    } else if (!player.currentEnemy) {
+        startCombat();
+    }
+    
+    renderCombat();
+    renderAchievements();
+    renderCharacter();
+    renderEquipment();
+    renderShop();
+    renderBosses();
+    updatePlayerStats();
+}
+
+// Переключение между игроками в режиме соревнования
 function switchPlayer(playerId) {
-    gameData.currentPlayer = playerId;
+    if (gameData.gameMode !== 'competition') return;
+    
+    gameData.currentPlayerId = playerId;
+    
+    // Обновляем кнопки выбора
     document.querySelectorAll('.player-btn').forEach(btn => btn.classList.remove('active'));
-    const btnId = playerId === 'kirill' ? 'selectKirill' : 'selectYulya';
+    const btnId = playerId === 'player1' ? 'selectPlayer1' : 'selectPlayer2';
     const btn = document.getElementById(btnId);
     if (btn) btn.classList.add('active');
+    
+    // Обновляем имя в поле ввода
+    const nameInput = document.getElementById('playerNameInput');
+    if (nameInput) {
+        nameInput.value = getCurrentPlayer().name;
+    }
     
     updatePlayerStats();
     renderAchievements();
     renderCharacter();
     renderCombat();
+    renderBosses(); // Обновляем боссов (они общие, но могут быть разные уровни игроков)
     saveGameData();
+}
+
+// Обновление интерфейса в зависимости от режима игры
+function updateUIForGameMode() {
+    const playerSelector = document.getElementById('playerSelector');
+    const singlePlayerNameSection = document.getElementById('singlePlayerNameSection');
+    
+    if (gameData.gameMode === 'competition') {
+        // Показываем переключатель игроков
+        if (playerSelector) playerSelector.style.display = 'flex';
+        if (singlePlayerNameSection) singlePlayerNameSection.style.display = 'flex';
+        
+        // Обновляем названия кнопок
+        const player1Btn = document.getElementById('selectPlayer1');
+        const player2Btn = document.getElementById('selectPlayer2');
+        if (player1Btn) player1Btn.textContent = gameData.player.name || 'Игрок 1';
+        if (player2Btn && gameData.player2) player2Btn.textContent = gameData.player2.name || 'Игрок 2';
+        
+        // Обновляем активную кнопку
+        document.querySelectorAll('.player-btn').forEach(btn => btn.classList.remove('active'));
+        const activeBtnId = gameData.currentPlayerId === 'player1' ? 'selectPlayer1' : 'selectPlayer2';
+        const activeBtn = document.getElementById(activeBtnId);
+        if (activeBtn) activeBtn.classList.add('active');
+    } else {
+        // Скрываем переключатель игроков
+        if (playerSelector) playerSelector.style.display = 'none';
+        if (singlePlayerNameSection) singlePlayerNameSection.style.display = 'flex';
+    }
+    
+    // Обновляем поле ввода имени
+    const nameInput = document.getElementById('playerNameInput');
+    if (nameInput) {
+        nameInput.value = getCurrentPlayer().name || 'Игрок';
+    }
+}
+
+// Сохранение имени игрока
+function savePlayerName() {
+    const nameInput = document.getElementById('playerNameInput');
+    if (!nameInput) return;
+    
+    const newName = nameInput.value.trim();
+    if (newName === '') {
+        showNotification('Имя не может быть пустым!');
+        nameInput.value = getCurrentPlayer().name || 'Игрок';
+        return;
+    }
+    
+    if (newName.length > 20) {
+        showNotification('Имя слишком длинное! Максимум 20 символов.');
+        nameInput.value = getCurrentPlayer().name || 'Игрок';
+        return;
+    }
+    
+    const player = getCurrentPlayer();
+    player.name = newName.toUpperCase();
+    
+    // Обновляем кнопку переключения если в режиме соревнования
+    if (gameData.gameMode === 'competition') {
+        const btnId = gameData.currentPlayerId === 'player1' ? 'selectPlayer1' : 'selectPlayer2';
+        const btn = document.getElementById(btnId);
+        if (btn) btn.textContent = player.name;
+    }
+    
+    updatePlayerStats();
+    renderCharacter();
+    updateUIForGameMode();
+    saveGameData();
+    
+    showNotification(`✅ Имя изменено на "${player.name}"`);
 }
 
 // Переключение вкладок
@@ -347,16 +696,38 @@ function switchTab(tabName) {
         const activeFilter = document.querySelector('.filter-btn.active')?.dataset.filter || 'all';
         renderAchievements(activeFilter);
     }
+    
+    // Если переключились на вкладку отчетов, обновляем список
+    if (tabName === 'reports') {
+        renderReports();
+    }
 }
 
 // Обновление статистики игрока
 function updatePlayerStats() {
     const player = getCurrentPlayer();
+    const totalStats = calculateTotalStats(player);
+    
     document.getElementById('playerLevel').textContent = player.level;
     document.getElementById('playerXP').textContent = player.xp;
     document.getElementById('playerXPNeeded').textContent = getXPNeeded(player.level);
     document.getElementById('playerCoins').textContent = player.coins;
     document.getElementById('characterName').textContent = player.name;
+    
+    // Обновляем поле ввода имени
+    const nameInput = document.getElementById('playerNameInput');
+    if (nameInput) {
+        nameInput.value = player.name;
+    }
+    
+    // Обновляем боевые статы если они есть
+    if (document.getElementById('playerAttack')) {
+        document.getElementById('playerAttack').textContent = totalStats.attack;
+        document.getElementById('playerDefense').textContent = totalStats.defense;
+        document.getElementById('playerHealth').textContent = player.stats.health;
+        document.getElementById('playerMaxHealth').textContent = player.stats.maxHealth;
+        document.getElementById('playerCrit').textContent = totalStats.crit;
+    }
 }
 
 // Получение необходимого опыта для уровня
@@ -494,28 +865,39 @@ function renderAchievements(filter = 'all') {
     const player = getCurrentPlayer();
     container.innerHTML = '';
     
-    let filteredAchievements = gameData.achievements;
+    // Объединяем стандартные и пользовательские достижения
+    let allAchievements = [...gameData.achievements];
+    if (player.customAchievements && player.customAchievements.length > 0) {
+        allAchievements = [...allAchievements, ...player.customAchievements];
+    }
+    
+    let filteredAchievements = allAchievements;
     if (filter !== 'all') {
-        filteredAchievements = gameData.achievements.filter(a => a.difficulty === filter);
+        filteredAchievements = allAchievements.filter(a => a.difficulty === filter);
     }
     
     filteredAchievements.forEach(achievement => {
         const lastCompletion = player.completedAchievements.find(ca => ca.id === achievement.id);
         const isAvailable = isAchievementAvailable(achievement.id);
         const timeLeft = getTimeUntilAvailable(achievement.id);
+        const isCustom = achievement.isCustom || false;
+        const rewards = gameData.achievementRewards[achievement.difficulty];
         
         const card = document.createElement('div');
-        card.className = `achievement-card ${lastCompletion && !isAvailable ? 'completed' : ''} ${isAvailable ? 'available' : 'cooldown'}`;
+        card.className = `achievement-card ${lastCompletion && !isAvailable ? 'completed' : ''} ${isAvailable ? 'available' : 'cooldown'} ${isCustom ? 'custom-achievement' : ''}`;
         
         card.innerHTML = `
             <div class="achievement-info">
-                <div class="achievement-name">${achievement.name}</div>
-                <div class="achievement-desc">${achievement.desc}</div>
+                <div class="achievement-name">
+                    ${achievement.name}
+                    ${isCustom ? '<span class="custom-badge">✏️</span>' : ''}
+                </div>
+                <div class="achievement-desc">${achievement.desc || ''}</div>
                 <div class="achievement-meta">
                     <span class="difficulty-badge difficulty-${achievement.difficulty}">
-                        ${achievement.difficulty === 'easy' ? 'Легко' : achievement.difficulty === 'medium' ? 'Средне' : 'Сложно'}
+                        ${achievement.difficulty === 'easy' ? 'Простое' : achievement.difficulty === 'medium' ? 'Среднее' : 'Сложное'}
                     </span>
-                    <span class="achievement-points">+${achievement.points} очков</span>
+                    <span class="achievement-points">+${rewards.xp} опыта, +${rewards.coins} монет</span>
                     ${lastCompletion ? `<span>✅ Выполнено: ${new Date(lastCompletion.date).toLocaleDateString('ru-RU')}</span>` : ''}
                     ${!isAvailable && timeLeft ? `<span class="cooldown-timer">⏰ Доступно через: ${timeLeft}</span>` : ''}
                 </div>
@@ -523,6 +905,7 @@ function renderAchievements(filter = 'all') {
             <div class="achievement-actions">
                 ${isAvailable ? `<button class="btn-primary" onclick="openAchievementModal('${achievement.id}')">Отметить</button>` : 
                   `<button class="btn-primary" disabled>⏳ Ожидание (${timeLeft})</button>`}
+                ${isCustom ? `<button class="btn-small btn-delete" onclick="deleteCustomAchievement('${achievement.id}')">🗑️</button>` : ''}
             </div>
         `;
         
@@ -545,25 +928,43 @@ function renderAchievements(filter = 'all') {
 
 // Открытие модального окна для отметки достижения
 function openAchievementModal(achievementId) {
-    const achievement = gameData.achievements.find(a => a.id === achievementId);
+    const player = getCurrentPlayer();
+    
+    // Ищем достижение в стандартных или пользовательских
+    let achievement = gameData.achievements.find(a => a.id === achievementId);
+    if (!achievement && player.customAchievements) {
+        achievement = player.customAchievements.find(a => a.id === achievementId);
+    }
+    
+    if (!achievement) {
+        console.error('Achievement not found:', achievementId);
+        return;
+    }
+    
     const modal = document.getElementById('achievementModal');
     
     document.getElementById('modalAchievementName').textContent = achievement.name;
-    document.getElementById('modalAchievementDesc').textContent = achievement.desc;
+    document.getElementById('modalAchievementDesc').textContent = achievement.desc || '';
     document.getElementById('achievementDate').value = new Date().toISOString().split('T')[0];
     modal.dataset.achievementId = achievementId;
     
     modal.classList.add('active');
 }
 
-// Расчет урона за достижение
+// Расчет урона за достижение (старая функция, оставлена для совместимости)
 function calculateAchievementDamage(achievement, player) {
     if (!achievement || !player) {
         console.error('calculateAchievementDamage: achievement or player is missing');
         return { damage: 0, isCrit: false };
     }
     
-    const baseDamage = achievement.points * 2; // Базовый урон = очки * 2
+    // Используем новые правила начисления урона
+    const rewards = gameData.achievementRewards[achievement.difficulty];
+    if (!rewards) {
+        return { damage: 0, isCrit: false };
+    }
+    
+    const baseDamage = rewards.damage;
     const totalStats = calculateTotalStats(player);
     const attackBonus = totalStats.attack;
     const totalDamage = baseDamage + attackBonus;
@@ -587,7 +988,7 @@ function attackEnemy() {
     }
     
     // Проверка накопленного урона
-    if (!player.accumulatedDamage || player.accumulatedDamage <= 0) {
+    if (player.accumulatedDamage === undefined || player.accumulatedDamage === null || player.accumulatedDamage <= 0) {
         showNotification('Нет накопленного урона! Выполните достижения, чтобы накопить урон.');
         return;
     }
@@ -598,7 +999,7 @@ function attackEnemy() {
         return;
     }
     
-    // Расходуем весь накопленный урон
+    // Используем весь накопленный урон для атаки
     const damage = player.accumulatedDamage;
     const totalStats = calculateTotalStats(player);
     
@@ -609,8 +1010,12 @@ function attackEnemy() {
     // Наносим урон
     enemy.hp = Math.max(0, enemy.hp - finalDamage);
     
-    // Обнуляем накопленный урон
-    player.accumulatedDamage = 0;
+    // Сохраняем HP врага в данных игрока
+    player.currentEnemyHp = enemy.hp;
+    
+    // Урон НЕ сбрасывается после атаки - продолжает накапливаться
+    // Это позволяет игроку накапливать урон между сессиями и использовать его когда нужно
+    // Опыт, монеты и урон сохраняются между сессиями и не сбрасываются автоматически
     
     // Визуализация урона
     showDamageIndicator(finalDamage, isCrit);
@@ -701,6 +1106,9 @@ function updateEnemyHealthBar() {
     const enemy = gameData.enemies.find(e => e.id === player.currentEnemy);
     if (!enemy) return;
     
+    // Сохраняем HP врага в данных игрока
+    player.currentEnemyHp = enemy.hp;
+    
     const hpBar = document.getElementById('enemyHpBar');
     const hpText = document.getElementById('enemyHpText');
     
@@ -712,29 +1120,44 @@ function updateEnemyHealthBar() {
     if (hpText) {
         hpText.textContent = `${enemy.hp}/${enemy.maxHp} HP`;
     }
+    
+    // Сохраняем данные после обновления HP
+    saveGameData();
 }
 
 // Начало боя (выбор нового врага)
 function startCombat() {
     const player = getCurrentPlayer();
     
-    // Инициализация накопленного урона если его нет
-    if (player.accumulatedDamage === undefined) {
+    // Инициализация накопленного урона если его нет (но не сбрасываем существующий!)
+    if (player.accumulatedDamage === undefined || player.accumulatedDamage === null) {
         player.accumulatedDamage = 0;
     }
+    // Урон сохраняется и накапливается между сессиями, не сбрасывается
     
     // Выбираем врага по уровню игрока
     const availableEnemies = gameData.enemies.filter(e => e.level <= player.level + 2);
+    let selectedEnemy;
+    
     if (availableEnemies.length === 0) {
-        player.currentEnemy = gameData.enemies[0].id;
+        selectedEnemy = gameData.enemies[0];
+        player.currentEnemy = selectedEnemy.id;
     } else {
         const randomEnemy = availableEnemies[Math.floor(Math.random() * availableEnemies.length)];
+        selectedEnemy = randomEnemy;
         player.currentEnemy = randomEnemy.id;
-        
-        // Восстанавливаем HP врага
-        const enemy = gameData.enemies.find(e => e.id === randomEnemy.id);
-        if (enemy) {
+    }
+    
+    // Восстанавливаем или загружаем HP врага
+    const enemy = gameData.enemies.find(e => e.id === selectedEnemy.id);
+    if (enemy) {
+        // Если есть сохраненное HP и это тот же враг, восстанавливаем его
+        if (player.currentEnemyHp !== null && player.currentEnemyHp !== undefined && player.currentEnemy === selectedEnemy.id) {
+            enemy.hp = Math.min(player.currentEnemyHp, enemy.maxHp);
+        } else {
+            // Иначе полное HP
             enemy.hp = enemy.maxHp;
+            player.currentEnemyHp = enemy.maxHp;
         }
     }
     
@@ -759,6 +1182,7 @@ function defeatEnemy(enemy) {
     
     // Сброс текущего врага
     player.currentEnemy = null;
+    player.currentEnemyHp = null;
     
     // Накопленный урон НЕ сбрасывается - можно использовать на следующего врага
     
@@ -810,7 +1234,12 @@ function confirmAchievement() {
         return;
     }
     
-    const achievement = gameData.achievements.find(a => a.id === achievementId);
+    // Ищем достижение в стандартных или пользовательских
+    let achievement = gameData.achievements.find(a => a.id === achievementId);
+    if (!achievement && player.customAchievements) {
+        achievement = player.customAchievements.find(a => a.id === achievementId);
+    }
+    
     if (!achievement) {
         console.error('Achievement not found:', achievementId);
         alert('Ошибка: достижение не найдено');
@@ -848,30 +1277,50 @@ function confirmAchievement() {
             id: achievementId,
             date: date,
             timestamp: timestamp,
-            points: achievement.points
+            difficulty: achievement.difficulty
         };
     } else {
         player.completedAchievements.push({
             id: achievementId,
             date: date,
             timestamp: timestamp,
-            points: achievement.points
+            difficulty: achievement.difficulty
         });
     }
     
-    // НАКАПЛИВАЕМ УРОН ЗА ДОСТИЖЕНИЕ!
-    const { damage, isCrit } = calculateAchievementDamage(achievement, player);
+    // Получаем награды по уровню сложности
+    const rewards = gameData.achievementRewards[achievement.difficulty];
+    if (!rewards) {
+        console.error('Rewards not found for difficulty:', achievement.difficulty);
+        modal.classList.remove('active');
+        return;
+    }
     
-    // Накапливаем урон вместо немедленного нанесения
+    // НАКАПЛИВАЕМ УРОН ЗА ДОСТИЖЕНИЕ!
+    const totalStats = calculateTotalStats(player);
+    const baseDamage = rewards.damage;
+    const attackBonus = totalStats.attack;
+    const totalDamage = baseDamage + attackBonus;
+    
+    // Проверка крита
+    const isCrit = Math.random() * 100 < totalStats.crit;
+    const finalDamage = isCrit ? Math.floor(totalDamage * 1.5) : totalDamage;
+    
+    // Накапливаем урон - он сохраняется между сессиями и не сбрасывается
     if (player.accumulatedDamage === undefined || player.accumulatedDamage === null) {
         player.accumulatedDamage = 0;
     }
-    player.accumulatedDamage += damage;
+    // Урон накапливается постоянно и не сбрасывается автоматически
+    player.accumulatedDamage += finalDamage;
     
-    // Добавление опыта
-    if (achievement.points && achievement.points > 0) {
-        addXP(achievement.points);
+    // Добавление опыта и монет по новым правилам
+    addXP(rewards.xp);
+    
+    // Добавление монет
+    if (player.coins === undefined || player.coins === null) {
+        player.coins = 0;
     }
+    player.coins += rewards.coins;
     
     modal.classList.remove('active');
     renderAchievements();
@@ -881,15 +1330,89 @@ function confirmAchievement() {
     
     // Уведомление
     const critText = isCrit ? ' 💥 КРИТ!' : '';
-    showNotification(`✅ Достижение "${achievement.name}" выполнено! Накоплено ${damage} урона${critText} (всего: ${player.accumulatedDamage})! +${achievement.points} опыта`);
+    showNotification(`✅ Достижение "${achievement.name}" выполнено! Накоплено ${finalDamage} урона${critText} (всего: ${player.accumulatedDamage})! +${rewards.xp} опыта, +${rewards.coins} монет`);
     
     console.log('Achievement completed:', {
         achievement: achievement.name,
-        points: achievement.points,
-        damage: damage,
+        difficulty: achievement.difficulty,
+        xp: rewards.xp,
+        coins: rewards.coins,
+        damage: finalDamage,
         totalDamage: player.accumulatedDamage,
         isCrit: isCrit
     });
+}
+
+// Создание пользовательского достижения
+function createCustomAchievement() {
+    const nameInput = document.getElementById('newAchievementName');
+    const descInput = document.getElementById('newAchievementDesc');
+    const selectedDifficulty = document.querySelector('.difficulty-option.selected');
+    
+    if (!nameInput || !nameInput.value.trim()) {
+        alert('Введите название достижения!');
+        return;
+    }
+    
+    if (!selectedDifficulty) {
+        alert('Выберите уровень сложности!');
+        return;
+    }
+    
+    const difficulty = selectedDifficulty.dataset.difficulty;
+    const player = getCurrentPlayer();
+    
+    if (!player.customAchievements) {
+        player.customAchievements = [];
+    }
+    
+    // Создаем уникальный ID
+    const newId = `custom_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    const newAchievement = {
+        id: newId,
+        name: nameInput.value.trim(),
+        desc: descInput.value.trim() || '',
+        difficulty: difficulty,
+        isCustom: true
+    };
+    
+    player.customAchievements.push(newAchievement);
+    
+    // Закрываем модальное окно
+    document.getElementById('createAchievementModal').classList.remove('active');
+    
+    // Очищаем форму
+    nameInput.value = '';
+    descInput.value = '';
+    document.querySelectorAll('.difficulty-option').forEach(btn => btn.classList.remove('selected'));
+    
+    // Обновляем список достижений
+    const activeFilter = document.querySelector('.filter-btn.active')?.dataset.filter || 'all';
+    renderAchievements(activeFilter);
+    saveGameData();
+    
+    showNotification(`✅ Достижение "${newAchievement.name}" создано!`);
+}
+
+// Удаление пользовательского достижения
+function deleteCustomAchievement(achievementId) {
+    if (!confirm('Удалить это достижение?')) {
+        return;
+    }
+    
+    const player = getCurrentPlayer();
+    if (!player.customAchievements) {
+        return;
+    }
+    
+    const index = player.customAchievements.findIndex(a => a.id === achievementId);
+    if (index >= 0) {
+        player.customAchievements.splice(index, 1);
+        renderAchievements();
+        saveGameData();
+        showNotification('✅ Достижение удалено');
+    }
 }
 
 // Рендеринг персонажа
@@ -1092,9 +1615,31 @@ function renderBosses() {
     const player = getCurrentPlayer();
     container.innerHTML = '';
     
+    // В режиме соревнования используем общий список боссов
+    let defeatedBossesList = [];
+    if (gameData.gameMode === 'competition') {
+        defeatedBossesList = gameData.sharedBosses || [];
+    } else {
+        defeatedBossesList = player.defeatedBosses || [];
+    }
+    
+    // Проверяем уровень для возможности сразиться
+    // В режиме соревнования проверяем уровень обоих игроков
+    let maxLevel = player.level;
+    if (gameData.gameMode === 'competition' && gameData.player2) {
+        maxLevel = Math.max(player.level, gameData.player2.level);
+    }
+    
     gameData.bosses.forEach(boss => {
-        const isDefeated = player.defeatedBosses && player.defeatedBosses.includes(boss.id);
-        const canFight = player.level >= boss.level;
+        const isDefeated = defeatedBossesList.includes(boss.id);
+        const canFight = maxLevel >= boss.level;
+        
+        // Определяем, кто победил босса (в режиме соревнования)
+        let defeatedBy = '';
+        if (isDefeated && gameData.gameMode === 'competition') {
+            // Можно добавить информацию о том, кто победил, если нужно
+            defeatedBy = ' (общий)';
+        }
         
         const card = document.createElement('div');
         card.className = `boss-card ${isDefeated ? 'defeated' : ''}`;
@@ -1103,14 +1648,300 @@ function renderBosses() {
             <div class="boss-sprite">${boss.sprite}</div>
             <div class="boss-name">${boss.name}</div>
             <div class="boss-level">Уровень: ${boss.level}</div>
+            ${gameData.gameMode === 'competition' ? '<div style="font-size: 12px; color: #7f8c8d; margin-top: 5px;">👥 Общий босс</div>' : ''}
             <div style="margin-top: 10px;">
-                ${isDefeated ? '<span style="color: #27ae60;">✅ Побежден</span>' : 
+                ${isDefeated ? `<span style="color: #27ae60;">✅ Побежден${defeatedBy}</span>` : 
                   canFight ? `<button class="btn-primary" onclick="fightBoss('${boss.id}')">Сразиться</button>` :
-                  '<span style="color: #e74c3c;">Требуется уровень ' + boss.level + '</span>'}
+                  `<span style="color: #e74c3c;">Требуется уровень ${boss.level}</span>`}
             </div>
         `;
         
         container.appendChild(card);
+    });
+}
+
+// Рендеринг отчетов/чата
+function renderReports() {
+    const container = document.getElementById('reportsList');
+    const formTitle = document.getElementById('reportFormTitle');
+    const player = getCurrentPlayer();
+    
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    // Обновляем заголовок формы
+    if (formTitle) {
+        if (gameData.gameMode === 'competition') {
+            formTitle.textContent = '📸 Отправить отчет партнеру';
+        } else {
+            formTitle.textContent = '📸 Добавить отчет в архив';
+        }
+    }
+    
+    // Заполняем список достижений для выбора
+    const achievementSelect = document.getElementById('reportAchievementSelect');
+    if (achievementSelect) {
+        achievementSelect.innerHTML = '<option value="">-- Выберите достижение --</option>';
+        
+        // Стандартные достижения
+        gameData.achievements.forEach(achievement => {
+            const option = document.createElement('option');
+            option.value = achievement.id;
+            option.textContent = achievement.name;
+            achievementSelect.appendChild(option);
+        });
+        
+        // Пользовательские достижения
+        if (player.customAchievements && player.customAchievements.length > 0) {
+            player.customAchievements.forEach(achievement => {
+                const option = document.createElement('option');
+                option.value = achievement.id;
+                option.textContent = achievement.name + ' (✏️)';
+                achievementSelect.appendChild(option);
+            });
+        }
+    }
+    
+    // Сортируем отчеты по времени (новые сверху)
+    const sortedReports = [...(gameData.reports || [])].sort((a, b) => {
+        return new Date(b.timestamp) - new Date(a.timestamp);
+    });
+    
+    if (sortedReports.length === 0) {
+        container.innerHTML = '<div class="empty-reports">Пока нет отчетов. Отправьте первый отчет!</div>';
+        return;
+    }
+    
+    sortedReports.forEach(report => {
+        const reportCard = document.createElement('div');
+        reportCard.className = `report-card ${report.status || 'pending'}`;
+        
+        const isCurrentPlayer = report.playerId === gameData.currentPlayerId;
+        const isCompetition = gameData.gameMode === 'competition';
+        const canReview = isCompetition && !isCurrentPlayer && report.status === 'pending';
+        
+        let statusBadge = '';
+        if (isCompetition) {
+            if (report.status === 'approved') {
+                statusBadge = '<span class="status-badge approved">✅ Одобрено</span>';
+            } else if (report.status === 'rejected') {
+                statusBadge = '<span class="status-badge rejected">❌ Отклонено</span>';
+            } else {
+                statusBadge = '<span class="status-badge pending">⏳ Ожидает проверки</span>';
+            }
+        } else {
+            statusBadge = '<span class="status-badge archived">📁 В архиве</span>';
+        }
+        
+        reportCard.innerHTML = `
+            <div class="report-header">
+                <div class="report-author">
+                    <strong>${report.playerName}</strong>
+                    <span class="report-time">${new Date(report.timestamp).toLocaleString('ru-RU')}</span>
+                </div>
+                ${statusBadge}
+            </div>
+            <div class="report-achievement">
+                <strong>Достижение:</strong> ${report.achievementName}
+            </div>
+            ${report.photo ? `
+                <div class="report-photo-container">
+                    <img src="${report.photo}" alt="Фото отчета" class="report-photo" onclick="viewFullPhoto('${report.id}')" />
+                </div>
+            ` : '<div class="report-no-photo">📷 Фото не прикреплено</div>'}
+            ${canReview ? `
+                <div class="report-actions">
+                    <button class="btn-success" onclick="approveReport('${report.id}')">✅ Одобрить</button>
+                    <button class="btn-danger" onclick="rejectReport('${report.id}')">❌ Отклонить</button>
+                </div>
+            ` : ''}
+            ${report.reviewedBy && isCompetition ? `
+                <div class="report-review-info">
+                    Проверено: ${report.reviewedBy === 'player1' ? gameData.player.name : (gameData.player2 ? gameData.player2.name : 'Партнер')}
+                </div>
+            ` : ''}
+        `;
+        
+        container.appendChild(reportCard);
+    });
+}
+
+// Обработка выбора фото
+function handlePhotoSelect(event) {
+    const file = event.target.files[0];
+    const preview = document.getElementById('reportPhotoPreview');
+    
+    if (!file || !preview) return;
+    
+    if (!file.type.startsWith('image/')) {
+        showNotification('Пожалуйста, выберите изображение!');
+        event.target.value = '';
+        return;
+    }
+    
+    // Ограничение размера файла (5MB)
+    if (file.size > 5 * 1024 * 1024) {
+        showNotification('Файл слишком большой! Максимум 5MB.');
+        event.target.value = '';
+        return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        preview.innerHTML = `
+            <img src="${e.target.result}" alt="Предпросмотр" class="photo-preview-img" />
+            <button type="button" class="btn-small btn-remove-photo" onclick="removePhotoPreview()">✕</button>
+        `;
+    };
+    reader.readAsDataURL(file);
+}
+
+// Удаление предпросмотра фото
+function removePhotoPreview() {
+    const preview = document.getElementById('reportPhotoPreview');
+    const input = document.getElementById('reportPhotoInput');
+    if (preview) preview.innerHTML = '';
+    if (input) input.value = '';
+}
+
+// Отправка отчета
+function sendReport() {
+    const achievementSelect = document.getElementById('reportAchievementSelect');
+    const photoInput = document.getElementById('reportPhotoInput');
+    const preview = document.getElementById('reportPhotoPreview');
+    
+    if (!achievementSelect || !achievementSelect.value) {
+        showNotification('Выберите достижение!');
+        return;
+    }
+    
+    const achievementId = achievementSelect.value;
+    const player = getCurrentPlayer();
+    
+    // Находим достижение
+    let achievement = gameData.achievements.find(a => a.id === achievementId);
+    if (!achievement && player.customAchievements) {
+        achievement = player.customAchievements.find(a => a.id === achievementId);
+    }
+    
+    if (!achievement) {
+        showNotification('Достижение не найдено!');
+        return;
+    }
+    
+    // Получаем фото
+    let photoData = null;
+    if (photoInput && photoInput.files && photoInput.files[0]) {
+        const file = photoInput.files[0];
+        if (file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                photoData = e.target.result;
+                createReport(achievement, photoData);
+            };
+            reader.readAsDataURL(file);
+            return; // Асинхронная загрузка
+        }
+    }
+    
+    // Если фото нет, создаем отчет сразу
+    createReport(achievement, null);
+}
+
+// Создание отчета
+function createReport(achievement, photoData) {
+    const player = getCurrentPlayer();
+    
+    if (!gameData.reports) {
+        gameData.reports = [];
+    }
+    
+    const report = {
+        id: `report_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        playerId: gameData.currentPlayerId,
+        playerName: player.name,
+        achievementId: achievement.id,
+        achievementName: achievement.name,
+        photo: photoData,
+        timestamp: new Date().toISOString(),
+        status: gameData.gameMode === 'competition' ? 'pending' : 'archived',
+        reviewedBy: null
+    };
+    
+    gameData.reports.push(report);
+    saveGameData();
+    renderReports();
+    
+    // Очищаем форму
+    const achievementSelect = document.getElementById('reportAchievementSelect');
+    const photoInput = document.getElementById('reportPhotoInput');
+    const preview = document.getElementById('reportPhotoPreview');
+    if (achievementSelect) achievementSelect.value = '';
+    if (photoInput) photoInput.value = '';
+    if (preview) preview.innerHTML = '';
+    
+    if (gameData.gameMode === 'competition') {
+        showNotification('📤 Отчет отправлен партнеру на проверку!');
+    } else {
+        showNotification('📁 Отчет добавлен в архив!');
+    }
+}
+
+// Одобрение отчета
+function approveReport(reportId) {
+    const report = gameData.reports.find(r => r.id === reportId);
+    if (!report) return;
+    
+    report.status = 'approved';
+    report.reviewedBy = gameData.currentPlayerId;
+    
+    saveGameData();
+    renderReports();
+    showNotification('✅ Отчет одобрен!');
+}
+
+// Отклонение отчета
+function rejectReport(reportId) {
+    const report = gameData.reports.find(r => r.id === reportId);
+    if (!report) return;
+    
+    report.status = 'rejected';
+    report.reviewedBy = gameData.currentPlayerId;
+    
+    saveGameData();
+    renderReports();
+    showNotification('❌ Отчет отклонен!');
+}
+
+// Просмотр фото в полном размере
+function viewFullPhoto(reportId) {
+    const report = gameData.reports.find(r => r.id === reportId);
+    if (!report || !report.photo) return;
+    
+    // Создаем модальное окно для просмотра фото
+    const modal = document.createElement('div');
+    modal.className = 'modal active';
+    modal.style.zIndex = '2000';
+    modal.innerHTML = `
+        <div class="modal-content photo-viewer-modal">
+            <span class="close-photo-viewer" onclick="this.closest('.modal').remove()">&times;</span>
+            <h3>Фото отчета: ${report.achievementName}</h3>
+            <img src="${report.photo}" alt="Фото отчета" class="full-photo-view" />
+            <div class="photo-viewer-info">
+                <p><strong>От:</strong> ${report.playerName}</p>
+                <p><strong>Дата:</strong> ${new Date(report.timestamp).toLocaleString('ru-RU')}</p>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Закрытие при клике вне фото
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.remove();
+        }
     });
 }
 
@@ -1119,26 +1950,60 @@ function fightBoss(bossId) {
     const player = getCurrentPlayer();
     const boss = gameData.bosses.find(b => b.id === bossId);
     
-    if (player.level < boss.level) {
+    if (!boss) {
+        showNotification('Босс не найден!');
+        return;
+    }
+    
+    // Проверка уровня - в режиме соревнования проверяем уровень обоих игроков
+    let maxLevel = player.level;
+    if (gameData.gameMode === 'competition' && gameData.player2) {
+        maxLevel = Math.max(player.level, gameData.player2.level);
+    }
+    
+    if (maxLevel < boss.level) {
         showNotification('Недостаточный уровень!');
         return;
     }
     
-    if (player.defeatedBosses && player.defeatedBosses.includes(bossId)) {
+    // Проверка, побежден ли босс
+    let isDefeated = false;
+    if (gameData.gameMode === 'competition') {
+        isDefeated = gameData.sharedBosses && gameData.sharedBosses.includes(bossId);
+    } else {
+        isDefeated = player.defeatedBosses && player.defeatedBosses.includes(bossId);
+    }
+    
+    if (isDefeated) {
         showNotification('Этот босс уже побежден!');
         return;
     }
     
     // Простая механика битвы (можно улучшить)
-    const winChance = Math.min(0.5 + (player.level - boss.level) * 0.1, 0.9);
+    // В режиме соревнования используем максимальный уровень
+    const winChance = Math.min(0.5 + (maxLevel - boss.level) * 0.1, 0.9);
     const won = Math.random() < winChance;
     
     if (won) {
-        if (!player.defeatedBosses) player.defeatedBosses = [];
-        player.defeatedBosses.push(bossId);
-        player.coins += boss.reward;
-        addXP(boss.reward);
-        showNotification(`🎉 Победа над ${boss.name}! +${boss.reward} монет и опыта`);
+        // В режиме соревнования добавляем в общий список
+        if (gameData.gameMode === 'competition') {
+            if (!gameData.sharedBosses) gameData.sharedBosses = [];
+            if (!gameData.sharedBosses.includes(bossId)) {
+                gameData.sharedBosses.push(bossId);
+            }
+            // Награды получает только тот, кто сражался
+            player.coins += boss.reward;
+            addXP(boss.reward);
+            showNotification(`🎉 Победа над ${boss.name}! +${boss.reward} монет и опыта (общий босс)`);
+        } else {
+            // В одиночной игре добавляем в личный список
+            if (!player.defeatedBosses) player.defeatedBosses = [];
+            player.defeatedBosses.push(bossId);
+            player.coins += boss.reward;
+            addXP(boss.reward);
+            showNotification(`🎉 Победа над ${boss.name}! +${boss.reward} монет и опыта`);
+        }
+        
         renderBosses();
         updatePlayerStats();
         saveGameData();
@@ -1226,9 +2091,18 @@ function showNotification(message) {
 function renderCombat() {
     const player = getCurrentPlayer();
     
-    // Инициализация накопленного урона если его нет
-    if (player.accumulatedDamage === undefined) {
+    // Инициализация накопленного урона если его нет (но не сбрасываем существующий!)
+    if (player.accumulatedDamage === undefined || player.accumulatedDamage === null) {
         player.accumulatedDamage = 0;
+    }
+    // Урон сохраняется и накапливается между сессиями, не сбрасывается
+    
+    // Восстанавливаем HP врага из сохраненных данных
+    if (player.currentEnemy && player.currentEnemyHp !== null && player.currentEnemyHp !== undefined) {
+        const enemy = gameData.enemies.find(e => e.id === player.currentEnemy);
+        if (enemy) {
+            enemy.hp = Math.min(player.currentEnemyHp, enemy.maxHp);
+        }
     }
     
     // Обновление статов игрока
@@ -1476,26 +2350,21 @@ function unequipItem(slot) {
     showNotification(`✅ Снято: ${item.name}`);
 }
 
-// Обновление статов в интерфейсе
-function updatePlayerStats() {
-    const player = getCurrentPlayer();
-    const totalStats = calculateTotalStats(player);
-    
-    document.getElementById('playerLevel').textContent = player.level;
-    document.getElementById('playerXP').textContent = player.xp;
-    document.getElementById('playerXPNeeded').textContent = getXPNeeded(player.level);
-    document.getElementById('playerCoins').textContent = player.coins;
-    document.getElementById('characterName').textContent = player.name;
-    
-    // Обновляем боевые статы если они есть
-    if (document.getElementById('playerAttack')) {
-        document.getElementById('playerAttack').textContent = totalStats.attack;
-        document.getElementById('playerDefense').textContent = totalStats.defense;
-        document.getElementById('playerHealth').textContent = player.stats.health;
-        document.getElementById('playerMaxHealth').textContent = player.stats.maxHealth;
-        document.getElementById('playerCrit').textContent = totalStats.crit;
-    }
-}
+
+// Убеждаемся, что все функции доступны глобально для onclick обработчиков
+window.attackEnemy = attackEnemy;
+window.startCombat = startCombat;
+window.openAchievementModal = openAchievementModal;
+window.deleteCustomAchievement = deleteCustomAchievement;
+window.buyItem = buyItem;
+window.fightBoss = fightBoss;
+window.viewFullPhoto = viewFullPhoto;
+window.approveReport = approveReport;
+window.rejectReport = rejectReport;
+window.removePhotoPreview = removePhotoPreview;
+window.equipItem = equipItem;
+window.unequipItem = unequipItem;
+window.unlockLocation = unlockLocation;
 
 // Инициализация при загрузке страницы
 document.addEventListener('DOMContentLoaded', initGame);

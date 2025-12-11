@@ -17,9 +17,15 @@
         <header class="game-header">
             <h1>🎮 ОЧИВКИ</h1>
             <div class="player-info">
-                <div class="player-selector">
-                    <button id="selectKirill" class="player-btn active">КИРИЛЛ</button>
-                    <button id="selectYulya" class="player-btn">ЮЛЯ</button>
+                <div class="player-name-section">
+                    <div id="playerSelector" class="player-selector" style="display: none;">
+                        <button id="selectPlayer1" class="player-btn active">Игрок 1</button>
+                        <button id="selectPlayer2" class="player-btn">Игрок 2</button>
+                    </div>
+                    <div id="singlePlayerNameSection" class="single-player-name">
+                        <input type="text" id="playerNameInput" class="player-name-input" placeholder="Введите ваше имя" maxlength="20">
+                        <button id="saveNameBtn" class="btn-save-name">💾</button>
+                    </div>
                 </div>
                 <div class="stats">
                     <div class="stat">
@@ -41,6 +47,7 @@
         <nav class="game-nav">
             <button class="nav-btn active" data-tab="combat">⚔️ Бой</button>
             <button class="nav-btn" data-tab="achievements">🏆 Достижения</button>
+            <button class="nav-btn" data-tab="reports">💬 Отчеты</button>
             <button class="nav-btn" data-tab="character">👤 Персонаж</button>
             <button class="nav-btn" data-tab="equipment">🎒 Экипировка</button>
             <button class="nav-btn" data-tab="shop">🛒 Магазин</button>
@@ -98,11 +105,14 @@
             
             <!-- Вкладка Достижения -->
             <div id="tab-achievements" class="tab-content">
-                <div class="achievements-filter">
-                    <button class="filter-btn active" data-filter="all">Все</button>
-                    <button class="filter-btn" data-filter="easy">Легкие</button>
-                    <button class="filter-btn" data-filter="medium">Средние</button>
-                    <button class="filter-btn" data-filter="hard">Сложные</button>
+                <div class="achievements-header">
+                    <div class="achievements-filter">
+                        <button class="filter-btn active" data-filter="all">Все</button>
+                        <button class="filter-btn" data-filter="easy">Легкие</button>
+                        <button class="filter-btn" data-filter="medium">Средние</button>
+                        <button class="filter-btn" data-filter="hard">Сложные</button>
+                    </div>
+                    <button id="addAchievementBtn" class="btn-primary btn-add-achievement">➕ Добавить достижение</button>
                 </div>
                 <div id="achievementsList" class="achievements-list"></div>
             </div>
@@ -112,7 +122,7 @@
                 <div class="character-customization">
                     <div class="character-preview">
                         <div id="characterSprite" class="character-sprite"></div>
-                        <div class="character-name" id="characterName">КИРИЛЛ</div>
+                        <div class="character-name" id="characterName">Игрок</div>
                     </div>
                     <div class="customization-options">
                         <div class="custom-section">
@@ -158,11 +168,55 @@
                 <div id="bossesList" class="bosses-list"></div>
             </div>
 
+            <!-- Вкладка Отчеты/Чат -->
+            <div id="tab-reports" class="tab-content">
+                <div class="reports-container">
+                    <div id="reportsList" class="reports-list"></div>
+                    <div class="report-form">
+                        <div class="report-form-header">
+                            <h3 id="reportFormTitle">📸 Отправить отчет о достижении</h3>
+                        </div>
+                        <div class="form-group">
+                            <label>Выберите достижение:</label>
+                            <select id="reportAchievementSelect" class="form-input">
+                                <option value="">-- Выберите достижение --</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Фото отчета:</label>
+                            <input type="file" id="reportPhotoInput" accept="image/*" class="form-input" />
+                            <div id="reportPhotoPreview" class="photo-preview"></div>
+                        </div>
+                        <button id="sendReportBtn" class="btn-primary">📤 Отправить отчет</button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Вкладка Локации -->
             <div id="tab-locations" class="tab-content">
                 <div id="locationsList" class="locations-list"></div>
             </div>
         </main>
+    </div>
+
+    <!-- Модальное окно выбора режима игры -->
+    <div id="gameModeModal" class="modal active">
+        <div class="modal-content mode-selection-modal">
+            <h2>🎮 Выберите режим игры</h2>
+            <p class="mode-description">Как вы хотите играть?</p>
+            <div class="mode-options">
+                <button id="singlePlayerMode" class="mode-btn">
+                    <div class="mode-icon">👤</div>
+                    <div class="mode-title">Одиночная игра</div>
+                    <div class="mode-desc">Играйте самостоятельно</div>
+                </button>
+                <button id="competitionMode" class="mode-btn">
+                    <div class="mode-icon">👥</div>
+                    <div class="mode-title">Соревнование</div>
+                    <div class="mode-desc">Соревнуйтесь с партнером</div>
+                </button>
+            </div>
+        </div>
     </div>
 
     <!-- Модальное окно для отметки достижения -->
@@ -176,6 +230,40 @@
                 <input type="date" id="achievementDate" />
             </div>
             <button id="confirmAchievement" class="btn-primary">Отметить выполнение</button>
+        </div>
+    </div>
+
+    <!-- Модальное окно для создания достижения -->
+    <div id="createAchievementModal" class="modal">
+        <div class="modal-content">
+            <span class="close-create">&times;</span>
+            <h2>➕ Создать новое достижение</h2>
+            <div class="form-group">
+                <label>Название:</label>
+                <input type="text" id="newAchievementName" class="form-input" placeholder="Например: Пробежка 5 км" maxlength="50" />
+            </div>
+            <div class="form-group">
+                <label>Описание:</label>
+                <textarea id="newAchievementDesc" class="form-textarea" placeholder="Описание достижения" maxlength="200"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Уровень сложности:</label>
+                <div class="difficulty-selector">
+                    <button class="difficulty-option" data-difficulty="easy">
+                        <div class="difficulty-title">Простое</div>
+                        <div class="difficulty-reward">5 опыта, 3 монеты</div>
+                    </button>
+                    <button class="difficulty-option" data-difficulty="medium">
+                        <div class="difficulty-title">Среднее</div>
+                        <div class="difficulty-reward">15 опыта, 6 монет</div>
+                    </button>
+                    <button class="difficulty-option" data-difficulty="hard">
+                        <div class="difficulty-title">Сложное</div>
+                        <div class="difficulty-reward">30 опыта, 10 монет</div>
+                    </button>
+                </div>
+            </div>
+            <button id="createAchievementBtn" class="btn-primary">Создать</button>
         </div>
     </div>
 
