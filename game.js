@@ -1,16 +1,50 @@
 // Игровые данные
 const gameData = {
     gameMode: null, // 'single' или 'competition'
+    isRegistered: false, // Зарегистрирован ли пользователь
+    playerId: null, // Уникальный ID игрока
+    telegramUser: null, // Данные пользователя из Telegram
     player: {
-        name: 'Игрок',
+        name: '',
         level: 1,
         xp: 0,
         coins: 0,
-        hairColor: '#8B4513',
-        clothesColor: '#3498db',
-        accessories: [],
+        // Расширенная кастомизация персонажа
+        customization: {
+            // Лицо
+            face: {
+                skinColor: '#FDBCB4', // Цвет кожи
+                eyeType: 'normal', // Тип глаз: normal, big, small, closed, wink
+                eyeColor: '#4A90E2', // Цвет глаз
+                eyebrowType: 'normal', // Тип бровей: normal, thick, thin, angry
+                noseType: 'normal', // Тип носа: normal, small, big
+                mouthType: 'smile', // Тип рта: smile, neutral, open, bigSmile
+                // Старые поля для совместимости
+                hairColor: '#8B4513',
+                clothesColor: '#3498db'
+            },
+            // Волосы
+            hair: {
+                style: 'short', // Стиль: short, medium, long, ponytail, bun, mohawk, afro, bald
+                color: '#8B4513' // Цвет волос
+            },
+            // Одежда
+            clothing: {
+                top: 'tshirt', // Тип верха: tshirt, shirt, tank, dress, jacket
+                topColor: '#3498db', // Цвет верха
+                bottom: 'pants', // Тип низа: pants, shorts, skirt
+                bottomColor: '#2c3e50', // Цвет низа
+                shoes: 'sneakers', // Тип обуви: sneakers, boots, sandals, heels
+                shoesColor: '#1a1a1a' // Цвет обуви
+            },
+            // Аксессуары
+            accessories: []
+        },
+        accessories: [], // Старое поле для совместимости
         completedAchievements: [],
         customAchievements: [], // Пользовательские достижения
+        inProgressAchievements: [], // Достижения в процессе выполнения (для режима соревнования)
+        // Структура: { id: achievementId, startedAt: timestamp, reportSent: false }
         defeatedBosses: [],
         unlockedLocations: ['forest'],
         // Боевые статы
@@ -33,8 +67,13 @@ const gameData = {
         currentEnemyHp: null, // HP текущего врага (для сохранения)
         accumulatedDamage: 0 // Накопленный урон за достижения
     },
+    partnerId: null, // ID партнера для режима соревнования
     player2: null, // Данные второго игрока (только в режиме соревнования)
     currentPlayerId: 'player1', // 'player1' или 'player2' (только в режиме соревнования)
+    
+    // Система друзей
+    friends: [], // Список друзей
+    // Структура друга: { id: playerId, name: имя, telegramId: telegram id (если есть), addedAt: timestamp }
     
     // Общие данные для режима соревнования
     sharedBosses: [], // Общий список побежденных боссов в режиме соревнования
@@ -167,6 +206,14 @@ const gameData = {
     ]
 };
 
+// Генерация уникального ID игрока
+function generatePlayerId() {
+    // Генерируем уникальный ID на основе времени и случайных символов
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).substr(2, 9);
+    return `P${timestamp}${random}`.toUpperCase();
+}
+
 // Инициализация игры
 function initGame() {
     // Инициализация Telegram Web App (если доступно)
@@ -179,10 +226,28 @@ function initGame() {
         // Установка цвета темы
         tg.setHeaderColor('#667eea');
         tg.setBackgroundColor('#667eea');
+        
+        // Получаем данные пользователя из Telegram
+        const user = tg.initDataUnsafe?.user;
+        if (user) {
+            gameData.telegramUser = {
+                id: user.id,
+                firstName: user.first_name,
+                lastName: user.last_name || '',
+                username: user.username || null,
+                languageCode: user.language_code || 'ru'
+            };
+        }
     }
     
     loadGameData();
     setupEventListeners();
+    
+    // Проверяем регистрацию
+    if (!gameData.isRegistered) {
+        showRegistrationModal();
+        return;
+    }
     
     // Проверяем, выбран ли режим игры
     if (!gameData.gameMode) {
@@ -224,6 +289,12 @@ function loadGameData() {
     if (saved) {
         const parsed = JSON.parse(saved);
         
+        // Загружаем данные регистрации
+        gameData.isRegistered = parsed.isRegistered || false;
+        gameData.playerId = parsed.playerId || null;
+        gameData.telegramUser = parsed.telegramUser || null;
+        gameData.partnerId = parsed.partnerId || null;
+        
         // Загружаем режим игры
         gameData.gameMode = parsed.gameMode || null;
         gameData.currentPlayerId = parsed.currentPlayerId || 'player1';
@@ -247,8 +318,66 @@ function loadGameData() {
         } else if (parsed.player) {
             // Новая структура данных
             Object.assign(gameData.player, parsed.player);
+            
+            // Миграция старых данных кастомизации
+            if (!gameData.player.customization) {
+                gameData.player.customization = {
+                    face: {
+                        skinColor: '#FDBCB4',
+                        eyeType: 'normal',
+                        eyeColor: '#4A90E2',
+                        eyebrowType: 'normal',
+                        noseType: 'normal',
+                        mouthType: 'smile',
+                        hairColor: gameData.player.hairColor || '#8B4513',
+                        clothesColor: gameData.player.clothesColor || '#3498db'
+                    },
+                    hair: {
+                        style: 'short',
+                        color: gameData.player.hairColor || '#8B4513'
+                    },
+                    clothing: {
+                        top: 'tshirt',
+                        topColor: gameData.player.clothesColor || '#3498db',
+                        bottom: 'pants',
+                        bottomColor: '#2c3e50',
+                        shoes: 'sneakers',
+                        shoesColor: '#1a1a1a'
+                    },
+                    accessories: gameData.player.accessories || []
+                };
+            }
+            
             if (parsed.player2) {
                 gameData.player2 = parsed.player2;
+                // Миграция для player2 тоже
+                if (!gameData.player2.customization) {
+                    gameData.player2.customization = {
+                        face: {
+                            skinColor: '#FDBCB4',
+                            eyeType: 'normal',
+                            eyeColor: '#4A90E2',
+                            eyebrowType: 'normal',
+                            noseType: 'normal',
+                            mouthType: 'smile',
+                            hairColor: gameData.player2.hairColor || '#8B4513',
+                            clothesColor: gameData.player2.clothesColor || '#3498db'
+                        },
+                        hair: {
+                            style: 'short',
+                            color: gameData.player2.hairColor || '#8B4513'
+                        },
+                        clothing: {
+                            top: 'tshirt',
+                            topColor: gameData.player2.clothesColor || '#3498db',
+                            bottom: 'pants',
+                            bottomColor: '#2c3e50',
+                            shoes: 'sneakers',
+                            shoesColor: '#1a1a1a'
+                        },
+                        accessories: gameData.player2.accessories || []
+                    };
+                }
             }
         }
         
@@ -283,6 +412,7 @@ function initPlayerData(player) {
     if (!player.name) player.name = 'Игрок';
     if (!player.completedAchievements) player.completedAchievements = [];
     if (!player.customAchievements) player.customAchievements = [];
+    if (!player.inProgressAchievements) player.inProgressAchievements = [];
     if (player.accumulatedDamage === undefined) player.accumulatedDamage = 0;
     if (!player.stats) {
         player.stats = {
@@ -333,7 +463,8 @@ function saveGameData() {
         player: gameData.player,
         currentPlayerId: gameData.currentPlayerId,
         reports: gameData.reports || [],
-        sharedBosses: gameData.sharedBosses || []
+        sharedBosses: gameData.sharedBosses || [],
+        friends: gameData.friends || []
     };
     
     if (gameData.gameMode === 'competition' && gameData.player2) {
@@ -353,6 +484,12 @@ function getCurrentPlayer() {
 
 // Настройка обработчиков событий
 function setupEventListeners() {
+    // Регистрация
+    const registerBtn = document.getElementById('registerBtn');
+    if (registerBtn) {
+        registerBtn.addEventListener('click', registerPlayer);
+    }
+    
     // Выбор режима игры
     const singlePlayerModeBtn = document.getElementById('singlePlayerMode');
     const competitionModeBtn = document.getElementById('competitionMode');
@@ -360,7 +497,25 @@ function setupEventListeners() {
         singlePlayerModeBtn.addEventListener('click', () => selectGameMode('single'));
     }
     if (competitionModeBtn) {
-        competitionModeBtn.addEventListener('click', () => selectGameMode('competition'));
+        competitionModeBtn.addEventListener('click', () => {
+            // В режиме соревнования нужно ввести ID партнера
+            showPartnerIdModal();
+        });
+    }
+    
+    // Подключение к партнеру
+    const connectPartnerBtn = document.getElementById('connectPartnerBtn');
+    if (connectPartnerBtn) {
+        connectPartnerBtn.addEventListener('click', connectToPartner);
+    }
+    
+    const partnerIdInput = document.getElementById('partnerIdInput');
+    if (partnerIdInput) {
+        partnerIdInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                connectToPartner();
+            }
+        });
     }
     
     // Переключение между игроками в режиме соревнования
@@ -494,6 +649,65 @@ function setupEventListeners() {
     });
 }
 
+// Регистрация игрока
+function registerPlayer() {
+    // Генерируем уникальный ID если его нет
+    if (!gameData.playerId) {
+        gameData.playerId = generatePlayerId();
+    }
+    
+    // Устанавливаем имя из Telegram или по умолчанию
+    if (gameData.telegramUser) {
+        gameData.player.name = gameData.telegramUser.firstName || 'Игрок';
+        if (gameData.telegramUser.lastName) {
+            gameData.player.name += ' ' + gameData.telegramUser.lastName;
+        }
+    } else {
+        gameData.player.name = 'Игрок';
+    }
+    
+    gameData.isRegistered = true;
+    
+    // Закрываем модальное окно регистрации
+    const registrationModal = document.getElementById('registrationModal');
+    if (registrationModal) {
+        registrationModal.classList.remove('active');
+    }
+    
+    saveGameData();
+    updatePlayerStats();
+    renderCharacter();
+    
+    // Показываем выбор режима игры
+    showGameModeSelection();
+}
+
+// Показать модальное окно регистрации
+function showRegistrationModal() {
+    const modal = document.getElementById('registrationModal');
+    const infoDiv = document.getElementById('registrationInfo');
+    
+    if (!modal || !infoDiv) return;
+    
+    // Заполняем информацию о пользователе
+    if (gameData.telegramUser) {
+        infoDiv.innerHTML = `
+            <p>Вы вошли через Telegram как:</p>
+            <div class="telegram-user-info">
+                <strong>${gameData.telegramUser.firstName} ${gameData.telegramUser.lastName || ''}</strong>
+                ${gameData.telegramUser.username ? `<div>@${gameData.telegramUser.username}</div>` : ''}
+            </div>
+        `;
+    } else {
+        infoDiv.innerHTML = `
+            <p>Для игры необходимо войти через Telegram</p>
+            <p class="telegram-warning">Откройте игру через Telegram бота</p>
+        `;
+    }
+    
+    modal.classList.add('active');
+}
+
 // Показать модальное окно выбора режима
 function showGameModeSelection() {
     const modal = document.getElementById('gameModeModal');
@@ -502,14 +716,239 @@ function showGameModeSelection() {
     }
 }
 
+// Показать модальное окно ввода ID партнера
+function showPartnerIdModal() {
+    const modal = document.getElementById('partnerIdModal');
+    if (!modal) return;
+    
+    modal.classList.add('active');
+    
+    // Очищаем поле ввода
+    const input = document.getElementById('partnerIdInput');
+    if (input) {
+        input.value = '';
+        input.focus();
+    }
+    
+    // Рендерим список друзей для выбора
+    const friendsSelectList = document.getElementById('friendsSelectList');
+    if (friendsSelectList && gameData.friends && gameData.friends.length > 0) {
+        friendsSelectList.innerHTML = '';
+        
+        gameData.friends.forEach(friend => {
+            const friendOption = document.createElement('div');
+            friendOption.className = 'friend-select-option';
+            friendOption.innerHTML = `
+                <div class="friend-select-info">
+                    <strong>${friend.name || `Друг (${friend.id})`}</strong>
+                    <span class="friend-select-id">${friend.id}</span>
+                </div>
+                <button class="btn-primary btn-small" onclick="selectFriendAsPartner('${friend.id}')">Выбрать</button>
+            `;
+            friendsSelectList.appendChild(friendOption);
+        });
+    }
+}
+
+// Выбрать друга как партнера
+function selectFriendAsPartner(friendId) {
+    const friend = gameData.friends.find(f => f.id === friendId);
+    if (!friend) return;
+    
+    gameData.partnerId = friendId;
+    
+    // Закрываем модальное окно
+    const modal = document.getElementById('partnerIdModal');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+    
+    // Выбираем режим соревнования
+    selectGameMode('competition');
+    
+    showNotification(`🎮 Подключение к ${friend.name || friendId}...`);
+}
+
+// Подключение к партнеру
+function connectToPartner() {
+    const partnerIdInput = document.getElementById('partnerIdInput');
+    if (!partnerIdInput) return;
+    
+    const partnerId = partnerIdInput.value.trim().toUpperCase();
+    
+    if (!partnerId) {
+        showNotification('Введите ID код партнера!');
+        return;
+    }
+    
+    if (partnerId === gameData.playerId) {
+        showNotification('Нельзя играть с самим собой!');
+        return;
+    }
+    
+    // Сохраняем ID партнера
+    gameData.partnerId = partnerId;
+    
+    // Закрываем модальное окно
+    const modal = document.getElementById('partnerIdModal');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+    
+    // Выбираем режим соревнования
+    selectGameMode('competition');
+}
+
+// Копирование ID игрока
+function copyPlayerId() {
+    if (!gameData.playerId) return;
+    
+    navigator.clipboard.writeText(gameData.playerId).then(() => {
+        showNotification('✅ ID код скопирован!');
+    }).catch(() => {
+        // Fallback для старых браузеров
+        const textArea = document.createElement('textarea');
+        textArea.value = gameData.playerId;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        showNotification('✅ ID код скопирован!');
+    });
+}
+
+// Рендеринг списка друзей
+function renderFriends() {
+    const friendsList = document.getElementById('friendsList');
+    if (!friendsList) return;
+    
+    friendsList.innerHTML = '';
+    
+    if (!gameData.friends || gameData.friends.length === 0) {
+        friendsList.innerHTML = '<div class="empty-friends">Пока нет друзей. Добавьте друга по ID коду!</div>';
+        return;
+    }
+    
+    gameData.friends.forEach(friend => {
+        const friendCard = document.createElement('div');
+        friendCard.className = 'friend-card';
+        
+        const isPartner = friend.id === gameData.partnerId;
+        
+        friendCard.innerHTML = `
+            <div class="friend-info">
+                <div class="friend-name">${friend.name || `Друг (${friend.id})`}</div>
+                <div class="friend-id">ID: ${friend.id}</div>
+                ${friend.telegramId ? `<div class="friend-telegram">Telegram ID: ${friend.telegramId}</div>` : ''}
+                <div class="friend-added">Добавлен: ${new Date(friend.addedAt).toLocaleDateString('ru-RU')}</div>
+            </div>
+            <div class="friend-actions">
+                ${isPartner ? '<span class="partner-badge">👥 Текущий партнер</span>' : ''}
+                <button class="btn-success btn-small" onclick="playWithFriend('${friend.id}')" ${isPartner ? 'disabled' : ''}>
+                    ${isPartner ? '✅ Играете вместе' : '🎮 Играть вместе'}
+                </button>
+                <button class="btn-danger btn-small" onclick="removeFriend('${friend.id}')">🗑️</button>
+            </div>
+        `;
+        
+        friendsList.appendChild(friendCard);
+    });
+}
+
+// Добавление друга
+function addFriend() {
+    const friendIdInput = document.getElementById('friendIdInput');
+    if (!friendIdInput) return;
+    
+    const friendId = friendIdInput.value.trim().toUpperCase();
+    
+    if (!friendId) {
+        showNotification('Введите ID код друга!');
+        return;
+    }
+    
+    if (friendId === gameData.playerId) {
+        showNotification('Нельзя добавить себя в друзья!');
+        friendIdInput.value = '';
+        return;
+    }
+    
+    // Проверяем, не добавлен ли уже этот друг
+    if (gameData.friends && gameData.friends.find(f => f.id === friendId)) {
+        showNotification('Этот друг уже добавлен!');
+        friendIdInput.value = '';
+        return;
+    }
+    
+    // Ищем данные друга в системе (если он зарегистрирован)
+    // В реальной системе здесь был бы запрос к серверу, но так как все локально,
+    // мы просто добавляем друга с базовой информацией
+    const newFriend = {
+        id: friendId,
+        name: `Друг (${friendId})`,
+        telegramId: null, // Можно добавить позже если будет синхронизация
+        addedAt: new Date().toISOString()
+    };
+    
+    if (!gameData.friends) {
+        gameData.friends = [];
+    }
+    
+    gameData.friends.push(newFriend);
+    
+    // Очищаем поле ввода
+    friendIdInput.value = '';
+    
+    saveGameData();
+    renderFriends();
+    showNotification(`✅ Друг ${friendId} добавлен!`);
+}
+
+// Удаление друга
+function removeFriend(friendId) {
+    if (!confirm('Удалить этого друга из списка?')) {
+        return;
+    }
+    
+    if (!gameData.friends) return;
+    
+    gameData.friends = gameData.friends.filter(f => f.id !== friendId);
+    
+    // Если это был текущий партнер, отключаем режим соревнования
+    if (gameData.partnerId === friendId) {
+        gameData.partnerId = null;
+        gameData.gameMode = 'single';
+        gameData.player2 = null;
+        gameData.currentPlayerId = 'player1';
+        showNotification('Режим соревнования отключен, так как партнер удален из друзей.');
+        updateUIForGameMode();
+    }
+    
+    saveGameData();
+    renderFriends();
+    showNotification('✅ Друг удален');
+}
+
+// Играть с другом
+function playWithFriend(friendId) {
+    // Устанавливаем партнера
+    gameData.partnerId = friendId;
+    
+    // Выбираем режим соревнования
+    selectGameMode('competition');
+    
+    showNotification(`🎮 Подключение к ${gameData.friends.find(f => f.id === friendId)?.name || friendId}...`);
+}
+
 // Выбор режима игры
 function selectGameMode(mode) {
     gameData.gameMode = mode;
     
     if (mode === 'competition') {
-        // Убеждаемся, что у первого игрока есть имя
-        if (!gameData.player.name || gameData.player.name === 'Игрок') {
-            gameData.player.name = 'Игрок 1';
+        // Проверяем, что введен ID партнера
+        if (!gameData.partnerId) {
+            showPartnerIdModal();
+            return;
         }
         
         // Инициализируем общий список боссов для соревнования
@@ -520,7 +959,7 @@ function selectGameMode(mode) {
         // Создаем второго игрока если его нет
         if (!gameData.player2) {
             gameData.player2 = {
-                name: 'Игрок 2',
+                name: `Партнер (${gameData.partnerId})`,
                 level: 1,
                 xp: 0,
                 coins: 0,
@@ -622,13 +1061,15 @@ function updateUIForGameMode() {
     if (gameData.gameMode === 'competition') {
         // Показываем переключатель игроков
         if (playerSelector) playerSelector.style.display = 'flex';
-        if (singlePlayerNameSection) singlePlayerNameSection.style.display = 'flex';
+        if (singlePlayerNameSection) singlePlayerNameSection.style.display = 'none'; // Скрываем поле ввода имени в дуо
         
         // Обновляем названия кнопок
         const player1Btn = document.getElementById('selectPlayer1');
         const player2Btn = document.getElementById('selectPlayer2');
-        if (player1Btn) player1Btn.textContent = gameData.player.name || 'Игрок 1';
-        if (player2Btn && gameData.player2) player2Btn.textContent = gameData.player2.name || 'Игрок 2';
+        if (player1Btn) player1Btn.textContent = gameData.player.name || 'Вы';
+        if (player2Btn && gameData.player2) {
+            player2Btn.textContent = gameData.player2.name || `Партнер (${gameData.partnerId})`;
+        }
         
         // Обновляем активную кнопку
         document.querySelectorAll('.player-btn').forEach(btn => btn.classList.remove('active'));
@@ -641,10 +1082,12 @@ function updateUIForGameMode() {
         if (singlePlayerNameSection) singlePlayerNameSection.style.display = 'flex';
     }
     
-    // Обновляем поле ввода имени
-    const nameInput = document.getElementById('playerNameInput');
-    if (nameInput) {
-        nameInput.value = getCurrentPlayer().name || 'Игрок';
+    // Обновляем поле ввода имени (только в одиночной игре)
+    if (gameData.gameMode !== 'competition') {
+        const nameInput = document.getElementById('playerNameInput');
+        if (nameInput) {
+            nameInput.value = getCurrentPlayer().name || 'Игрок';
+        }
     }
 }
 
@@ -883,16 +1326,80 @@ function renderAchievements(filter = 'all') {
         const isCustom = achievement.isCustom || false;
         const rewards = gameData.achievementRewards[achievement.difficulty];
         
+        // Проверяем статус в режиме соревнования
+        const inProgress = gameData.gameMode === 'competition' && 
+                          player.inProgressAchievements && 
+                          player.inProgressAchievements.find(ipa => ipa.id === achievement.id);
+        
+        // Проверяем, есть ли ожидающий проверки отчет для этого достижения
+        const pendingReport = gameData.gameMode === 'competition' && gameData.reports && 
+                            gameData.reports.find(r => r.achievementId === achievement.id && 
+                            r.playerId === gameData.currentPlayerId && r.status === 'pending');
+        
+        // Проверяем, есть ли отклоненный отчет
+        const rejectedReport = gameData.gameMode === 'competition' && gameData.reports && 
+                              gameData.reports.find(r => r.achievementId === achievement.id && 
+                              r.playerId === gameData.currentPlayerId && r.status === 'rejected');
+        
         const card = document.createElement('div');
-        card.className = `achievement-card ${lastCompletion && !isAvailable ? 'completed' : ''} ${isAvailable ? 'available' : 'cooldown'} ${isCustom ? 'custom-achievement' : ''}`;
+        let statusClass = '';
+        if (lastCompletion && !isAvailable) statusClass = 'completed';
+        else if (inProgress) statusClass = 'in-progress';
+        else if (rejectedReport) statusClass = 'rejected';
+        else if (isAvailable) statusClass = 'available';
+        else statusClass = 'cooldown';
+        
+        card.className = `achievement-card ${statusClass} ${isCustom ? 'custom-achievement' : ''}`;
+        
+        // Формируем кнопки действий
+        let actionButtons = '';
+        if (gameData.gameMode === 'competition') {
+            // Режим соревнования
+            if (rejectedReport) {
+                // Отклоненный отчет - показываем кнопки отказаться/переделать
+                actionButtons = `
+                    <button class="btn-danger btn-small" onclick="cancelAchievement('${achievement.id}')">Отказаться</button>
+                    <button class="btn-primary" onclick="restartAchievement('${achievement.id}')">🔄 Переделать</button>
+                `;
+            } else if (pendingReport) {
+                // Отчет отправлен, ждем проверки
+                actionButtons = `<button class="btn-primary" disabled>⏳ Ожидает проверки</button>`;
+            } else if (inProgress) {
+                // В процессе выполнения - нужно отправить отчет
+                actionButtons = `<button class="btn-warning" onclick="openReportModal('${achievement.id}')">📸 Отправить отчет</button>`;
+            } else if (isAvailable) {
+                // Можно начать выполнение
+                actionButtons = `<button class="btn-primary" onclick="startAchievement('${achievement.id}')">▶️ Начать выполнять</button>`;
+            } else {
+                actionButtons = `<button class="btn-primary" disabled>⏳ Ожидание (${timeLeft})</button>`;
+            }
+        } else {
+            // Одиночная игра - обычная логика
+            if (isAvailable) {
+                actionButtons = `<button class="btn-primary" onclick="openAchievementModal('${achievement.id}')">Отметить</button>`;
+            } else {
+                actionButtons = `<button class="btn-primary" disabled>⏳ Ожидание (${timeLeft})</button>`;
+            }
+        }
+        
+        if (isCustom) {
+            actionButtons += `<button class="btn-small btn-delete" onclick="deleteCustomAchievement('${achievement.id}')">🗑️</button>`;
+        }
         
         card.innerHTML = `
             <div class="achievement-info">
                 <div class="achievement-name">
                     ${achievement.name}
                     ${isCustom ? '<span class="custom-badge">✏️</span>' : ''}
+                    ${inProgress ? '<span class="in-progress-badge">🔄 В процессе</span>' : ''}
+                    ${rejectedReport ? '<span class="rejected-badge">❌ Отклонено</span>' : ''}
                 </div>
                 <div class="achievement-desc">${achievement.desc || ''}</div>
+                ${rejectedReport && rejectedReport.rejectionReason ? `
+                    <div class="rejection-reason">
+                        <strong>Причина отклонения:</strong> ${rejectedReport.rejectionReason}
+                    </div>
+                ` : ''}
                 <div class="achievement-meta">
                     <span class="difficulty-badge difficulty-${achievement.difficulty}">
                         ${achievement.difficulty === 'easy' ? 'Простое' : achievement.difficulty === 'medium' ? 'Среднее' : 'Сложное'}
@@ -903,9 +1410,7 @@ function renderAchievements(filter = 'all') {
                 </div>
             </div>
             <div class="achievement-actions">
-                ${isAvailable ? `<button class="btn-primary" onclick="openAchievementModal('${achievement.id}')">Отметить</button>` : 
-                  `<button class="btn-primary" disabled>⏳ Ожидание (${timeLeft})</button>`}
-                ${isCustom ? `<button class="btn-small btn-delete" onclick="deleteCustomAchievement('${achievement.id}')">🗑️</button>` : ''}
+                ${actionButtons}
             </div>
         `;
         
@@ -928,6 +1433,13 @@ function renderAchievements(filter = 'all') {
 
 // Открытие модального окна для отметки достижения
 function openAchievementModal(achievementId) {
+    // В режиме соревнования не используем это окно напрямую
+    if (gameData.gameMode === 'competition') {
+        // Предлагаем отправить отчет
+        openReportModal(achievementId);
+        return;
+    }
+    
     const player = getCurrentPlayer();
     
     // Ищем достижение в стандартных или пользовательских
@@ -949,6 +1461,174 @@ function openAchievementModal(achievementId) {
     modal.dataset.achievementId = achievementId;
     
     modal.classList.add('active');
+}
+
+// Начать выполнение достижения (режим соревнования)
+function startAchievement(achievementId) {
+    const player = getCurrentPlayer();
+    
+    if (!player.inProgressAchievements) {
+        player.inProgressAchievements = [];
+    }
+    
+    // Проверяем, не начато ли уже
+    if (player.inProgressAchievements.find(ipa => ipa.id === achievementId)) {
+        showNotification('Это достижение уже в процессе выполнения!');
+        return;
+    }
+    
+    // Ищем достижение
+    let achievement = gameData.achievements.find(a => a.id === achievementId);
+    if (!achievement && player.customAchievements) {
+        achievement = player.customAchievements.find(a => a.id === achievementId);
+    }
+    
+    if (!achievement) {
+        showNotification('Достижение не найдено!');
+        return;
+    }
+    
+    // Добавляем в процесс выполнения
+    player.inProgressAchievements.push({
+        id: achievementId,
+        startedAt: new Date().toISOString(),
+        reportSent: false
+    });
+    
+    saveGameData();
+    renderAchievements();
+    
+    // Показываем напоминание
+    showReminderModal(achievement);
+}
+
+// Показать напоминание об отчете
+function showReminderModal(achievement) {
+    const reminderModal = document.createElement('div');
+    reminderModal.className = 'modal active';
+    reminderModal.style.zIndex = '2000';
+    reminderModal.innerHTML = `
+        <div class="modal-content reminder-modal">
+            <h2>⚠️ Напоминание!</h2>
+            <div class="reminder-content">
+                <p><strong>Вы начали выполнение достижения:</strong></p>
+                <p class="reminder-achievement-name">${achievement.name}</p>
+                <div class="reminder-warning">
+                    <strong>⚠️ ОБЯЗАТЕЛЬНО СДЕЛАЙТЕ ОТЧЕТ СВОЕМУ ПАРТНЕРУ!</strong>
+                    <p>Только после одобрения партнером задание будет считаться выполненным.</p>
+                </div>
+                <p>Не забудьте отправить фото-отчет в разделе "Отчеты"!</p>
+            </div>
+            <button class="btn-primary" onclick="this.closest('.modal').remove()">Понятно</button>
+        </div>
+    `;
+    
+    document.body.appendChild(reminderModal);
+    
+    // Закрытие при клике вне модального окна
+    reminderModal.addEventListener('click', (e) => {
+        if (e.target === reminderModal) {
+            reminderModal.remove();
+        }
+    });
+}
+
+// Открыть модальное окно для отправки отчета
+function openReportModal(achievementId) {
+    const player = getCurrentPlayer();
+    
+    // Проверяем, что достижение в процессе выполнения
+    if (!player.inProgressAchievements || !player.inProgressAchievements.find(ipa => ipa.id === achievementId)) {
+        showNotification('Сначала начните выполнение достижения!');
+        return;
+    }
+    
+    // Переключаемся на вкладку отчетов
+    switchTab('reports');
+    
+    // Устанавливаем выбранное достижение в форме
+    const achievementSelect = document.getElementById('reportAchievementSelect');
+    if (achievementSelect) {
+        achievementSelect.value = achievementId;
+        // Скроллим к форме
+        setTimeout(() => {
+            const reportForm = document.querySelector('.report-form');
+            if (reportForm) {
+                reportForm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }, 100);
+    }
+    
+    showNotification('📸 Выберите фото и отправьте отчет партнеру!');
+}
+
+// Отказаться от задания
+function cancelAchievement(achievementId) {
+    if (!confirm('Отказаться от этого задания на сегодня? Оно будет доступно снова через 24 часа.')) {
+        return;
+    }
+    
+    const player = getCurrentPlayer();
+    
+    // Удаляем из процесса выполнения
+    if (player.inProgressAchievements) {
+        player.inProgressAchievements = player.inProgressAchievements.filter(ipa => ipa.id !== achievementId);
+    }
+    
+    // Удаляем отклоненные отчеты для этого достижения
+    if (gameData.reports) {
+        gameData.reports = gameData.reports.filter(r => 
+            !(r.achievementId === achievementId && r.playerId === gameData.currentPlayerId && r.status === 'rejected')
+        );
+    }
+    
+    saveGameData();
+    renderAchievements();
+    renderReports();
+    showNotification('✅ Задание отменено. Будет доступно через 24 часа.');
+}
+
+// Переделать задание
+function restartAchievement(achievementId) {
+    const player = getCurrentPlayer();
+    
+    // Удаляем отклоненные отчеты
+    if (gameData.reports) {
+        gameData.reports = gameData.reports.filter(r => 
+            !(r.achievementId === achievementId && r.playerId === gameData.currentPlayerId && r.status === 'rejected')
+        );
+    }
+    
+    // Добавляем в процесс выполнения заново
+    if (!player.inProgressAchievements) {
+        player.inProgressAchievements = [];
+    }
+    
+    // Удаляем старую запись если есть
+    player.inProgressAchievements = player.inProgressAchievements.filter(ipa => ipa.id !== achievementId);
+    
+    // Добавляем новую
+    player.inProgressAchievements.push({
+        id: achievementId,
+        startedAt: new Date().toISOString(),
+        reportSent: false
+    });
+    
+    saveGameData();
+    renderAchievements();
+    renderReports();
+    
+    // Показываем напоминание
+    let achievement = gameData.achievements.find(a => a.id === achievementId);
+    if (!achievement && player.customAchievements) {
+        achievement = player.customAchievements.find(a => a.id === achievementId);
+    }
+    
+    if (achievement) {
+        showReminderModal(achievement);
+    }
+    
+    showNotification('🔄 Задание отправлено на переделку! Не забудьте отправить отчет с фото!');
 }
 
 // Расчет урона за достижение (старая функция, оставлена для совместимости)
@@ -1415,82 +2095,512 @@ function deleteCustomAchievement(achievementId) {
     }
 }
 
-// Рендеринг персонажа
+// Рендеринг персонажа на Canvas
 function renderCharacter() {
     const player = getCurrentPlayer();
-    const sprite = document.getElementById('characterSprite');
+    const canvas = document.getElementById('characterCanvas');
     
-    if (!sprite) return; // Если элемента нет, выходим
+    if (!canvas) return;
     
-    // Простой пиксельный спрайт (можно заменить на реальные спрайты)
-    sprite.style.background = player.clothesColor || '#3498db';
-    sprite.innerHTML = '👤';
-    
-    // Цвета волос
-    const hairPicker = document.getElementById('hairColorPicker');
-    if (hairPicker) {
-        hairPicker.innerHTML = '';
-        const hairColors = ['#8B4513', '#000000', '#FFD700', '#FF69B4', '#00CED1', '#FF4500'];
-        hairColors.forEach(color => {
-            const option = document.createElement('div');
-            option.className = `color-option ${player.hairColor === color ? 'selected' : ''}`;
-            option.style.background = color;
-            option.addEventListener('click', () => {
-                player.hairColor = color;
-                document.querySelectorAll('#hairColorPicker .color-option').forEach(o => o.classList.remove('selected'));
-                option.classList.add('selected');
-                saveGameData();
-            });
-            hairPicker.appendChild(option);
-        });
+    // Обновляем отображение ID в личном кабинете
+    const playerIdDisplay = document.getElementById('playerIdDisplay');
+    if (playerIdDisplay && gameData.playerId) {
+        playerIdDisplay.textContent = gameData.playerId;
     }
     
-    // Цвета одежды
-    const clothesPicker = document.getElementById('clothesColorPicker');
-    if (clothesPicker) {
-        clothesPicker.innerHTML = '';
-        const clothesColors = ['#3498db', '#e91e63', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c'];
-        clothesColors.forEach(color => {
-            const option = document.createElement('div');
-            option.className = `color-option ${player.clothesColor === color ? 'selected' : ''}`;
-            option.style.background = color;
-            option.addEventListener('click', () => {
-                player.clothesColor = color;
-                document.querySelectorAll('#clothesColorPicker .color-option').forEach(o => o.classList.remove('selected'));
-                option.classList.add('selected');
-                if (sprite) sprite.style.background = color;
-                saveGameData();
-            });
-            clothesPicker.appendChild(option);
-        });
+    // Обновляем информацию о Telegram
+    const telegramInfo = document.getElementById('telegramInfo');
+    const telegramUserName = document.getElementById('telegramUserName');
+    if (telegramInfo && telegramUserName && gameData.telegramUser) {
+        let telegramText = gameData.telegramUser.firstName || '';
+        if (gameData.telegramUser.lastName) {
+            telegramText += ' ' + gameData.telegramUser.lastName;
+        }
+        if (gameData.telegramUser.username) {
+            telegramText += `<div>@${gameData.telegramUser.username}</div>`;
+        }
+        telegramUserName.innerHTML = telegramText;
+        telegramInfo.style.display = 'block';
+    } else if (telegramInfo) {
+        telegramInfo.style.display = 'none';
     }
     
-    // Аксессуары
+    // Рендерим список друзей
+    renderFriends();
+    
+    // Инициализируем кастомизацию если её нет
+    if (!player.customization) {
+        player.customization = {
+            face: {
+                skinColor: '#FDBCB4',
+                eyeType: 'normal',
+                eyeColor: '#4A90E2',
+                eyebrowType: 'normal',
+                noseType: 'normal',
+                mouthType: 'smile',
+                hairColor: player.hairColor || '#8B4513',
+                clothesColor: player.clothesColor || '#3498db'
+            },
+            hair: {
+                style: 'short',
+                color: player.hairColor || '#8B4513'
+            },
+            clothing: {
+                top: 'tshirt',
+                topColor: player.clothesColor || '#3498db',
+                bottom: 'pants',
+                bottomColor: '#2c3e50',
+                shoes: 'sneakers',
+                shoesColor: '#1a1a1a'
+            },
+            accessories: player.accessories || []
+        };
+    }
+    
+    const ctx = canvas.getContext('2d');
+    const cust = player.customization;
+    
+    // Очищаем canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Рисуем персонажа по слоям
+    drawCharacterOnCanvas(ctx, cust, canvas.width, canvas.height);
+    
+    // Рендерим UI кастомизации
+    renderCustomizationUI(player);
+}
+
+// Отрисовка персонажа на Canvas
+function drawCharacterOnCanvas(ctx, cust, width, height) {
+    // Используем фиксированный размер для пиксельной графики
+    const pixelSize = 2; // Размер одного пикселя
+    const baseWidth = 200;
+    const baseHeight = 300;
+    const scaleX = width / baseWidth;
+    const scaleY = height / baseHeight;
+    
+    // Функция для рисования пикселей
+    const pixel = (x, y, size = 1) => {
+        ctx.fillRect(x * scaleX, y * scaleY, size * scaleX, size * scaleY);
+    };
+    
+    // Функция для рисования области
+    const fillArea = (startX, startY, endX, endY) => {
+        for (let y = startY; y <= endY; y++) {
+            for (let x = startX; x <= endX; x++) {
+                pixel(x, y, 1);
+            }
+        }
+    };
+    
+    // Тело (нижний слой)
+    ctx.fillStyle = cust.clothing.bottomColor || '#2c3e50';
+    // Ноги/низ
+    if (cust.clothing.bottom === 'pants') {
+        // Штаны
+        for (let y = 200; y < 280; y++) {
+            for (let x = 70; x < 90; x++) pixel(x, y, 1);
+            for (let x = 110; x < 130; x++) pixel(x, y, 1);
+        }
+    } else if (cust.clothing.bottom === 'shorts') {
+        // Шорты
+        for (let y = 200; y < 240; y++) {
+            for (let x = 70; x < 90; x++) pixel(x, y, 1);
+            for (let x = 110; x < 130; x++) pixel(x, y, 1);
+        }
+        // Ноги
+        ctx.fillStyle = cust.face.skinColor || '#FDBCB4';
+        for (let y = 240; y < 280; y++) {
+            for (let x = 70; x < 90; x++) pixel(x, y, 1);
+            for (let x = 110; x < 130; x++) pixel(x, y, 1);
+        }
+    } else if (cust.clothing.bottom === 'skirt') {
+        // Юбка
+        for (let y = 200; y < 240; y++) {
+            for (let x = 80; x < 120; x++) pixel(x, y, 1);
+        }
+        // Ноги
+        ctx.fillStyle = cust.face.skinColor || '#FDBCB4';
+        for (let y = 240; y < 280; y++) {
+            for (let x = 75; x < 95; x++) pixel(x, y, 1);
+            for (let x = 105; x < 125; x++) pixel(x, y, 1);
+        }
+    }
+    
+    // Обувь
+    ctx.fillStyle = cust.clothing.shoesColor || '#1a1a1a';
+    if (cust.clothing.shoes === 'sneakers') {
+        fillArea(65, 275, 95, 285);
+        fillArea(105, 275, 135, 285);
+    } else if (cust.clothing.shoes === 'boots') {
+        fillArea(65, 270, 95, 285);
+        fillArea(105, 270, 135, 285);
+    } else if (cust.clothing.shoes === 'sandals') {
+        fillArea(70, 278, 90, 285);
+        fillArea(110, 278, 130, 285);
+    } else if (cust.clothing.shoes === 'heels') {
+        fillArea(70, 275, 85, 285);
+        fillArea(115, 275, 130, 285);
+        pixel(85, 280, 1);
+        pixel(125, 280, 1);
+    }
+    
+    // Торс
+    ctx.fillStyle = cust.clothing.topColor || '#3498db';
+    if (cust.clothing.top === 'tshirt' || cust.clothing.top === 'shirt') {
+        // Футболка/рубашка
+        for (let y = 140; y < 200; y++) {
+            for (let x = 75; x < 125; x++) pixel(x, y, 1);
+        }
+        // Руки
+        ctx.fillStyle = cust.face.skinColor || '#FDBCB4';
+        for (let y = 150; y < 200; y++) {
+            for (let x = 65; x < 75; x++) pixel(x, y, 1);
+            for (let x = 125; x < 135; x++) pixel(x, y, 1);
+        }
+    } else if (cust.clothing.top === 'tank') {
+        // Майка
+        for (let y = 150; y < 200; y++) {
+            for (let x = 80; x < 120; x++) pixel(x, y, 1);
+        }
+        // Руки
+        ctx.fillStyle = cust.face.skinColor || '#FDBCB4';
+        for (let y = 150; y < 200; y++) {
+            for (let x = 65; x < 80; x++) pixel(x, y, 1);
+            for (let x = 120; x < 135; x++) pixel(x, y, 1);
+        }
+    } else if (cust.clothing.top === 'dress') {
+        // Платье
+        for (let y = 140; y < 240; y++) {
+            for (let x = 80; x < 120; x++) pixel(x, y, 1);
+        }
+        // Руки
+        ctx.fillStyle = cust.face.skinColor || '#FDBCB4';
+        for (let y = 150; y < 200; y++) {
+            for (let x = 65; x < 80; x++) pixel(x, y, 1);
+            for (let x = 120; x < 135; x++) pixel(x, y, 1);
+        }
+    } else if (cust.clothing.top === 'jacket') {
+        // Куртка
+        for (let y = 140; y < 200; y++) {
+            for (let x = 70; x < 130; x++) pixel(x, y, 1);
+        }
+        // Руки
+        ctx.fillStyle = cust.clothing.topColor || '#3498db';
+        for (let y = 150; y < 200; y++) {
+            for (let x = 60; x < 70; x++) pixel(x, y, 1);
+            for (let x = 130; x < 140; x++) pixel(x, y, 1);
+        }
+    }
+    
+    // Голова (овальная форма)
+    ctx.fillStyle = cust.face.skinColor || '#FDBCB4';
+    const headCenterX = 100;
+    const headCenterY = 80;
+    const headRadiusX = 30;
+    const headRadiusY = 60;
+    
+    for (let y = 20; y < 140; y++) {
+        for (let x = 70; x < 130; x++) {
+            const dx = (x - headCenterX) / headRadiusX;
+            const dy = (y - headCenterY) / headRadiusY;
+            if (dx * dx + dy * dy < 1) {
+                pixel(x, y, 1);
+            }
+        }
+    }
+    
+    // Волосы (под лицом, но поверх головы)
+    ctx.fillStyle = cust.hair.color || '#8B4513';
+    drawHair(ctx, pixel, cust.hair.style || 'short', 100, 80);
+    
+    // Брови
+    ctx.fillStyle = '#2c3e50';
+    drawEyebrows(ctx, pixel, cust.face.eyebrowType || 'normal', 100, 80);
+    
+    // Глаза
+    ctx.fillStyle = cust.face.eyeColor || '#4A90E2';
+    drawEyes(ctx, pixel, cust.face.eyeType || 'normal', 100, 80);
+    
+    // Нос
+    ctx.fillStyle = cust.face.skinColor || '#FDBCB4';
+    drawNose(ctx, pixel, cust.face.noseType || 'normal', 100, 80);
+    
+    // Рот
+    ctx.fillStyle = '#8B0000';
+    drawMouth(ctx, pixel, cust.face.mouthType || 'smile', 100, 80);
+}
+
+// Рисование волос
+function drawHair(ctx, pixel, style, centerX, centerY) {
+    const hairColor = ctx.fillStyle;
+    
+    if (style === 'short') {
+        // Короткие волосы
+        for (let y = 25; y < 100; y++) {
+            for (let x = 75; x < 125; x++) {
+                const dx = (x - centerX) / 25;
+                const dy = (y - centerY + 20) / 40;
+                if (dx * dx + dy * dy < 1 && y < 95) {
+                    pixel(x, y, 1);
+                }
+            }
+        }
+    } else if (style === 'medium') {
+        // Средние волосы
+        for (let y = 25; y < 120; y++) {
+            for (let x = 75; x < 125; x++) {
+                const dx = (x - centerX) / 25;
+                const dy = (y - centerY + 20) / 50;
+                if (dx * dx + dy * dy < 1 && y < 115) {
+                    pixel(x, y, 1);
+                }
+            }
+        }
+    } else if (style === 'long') {
+        // Длинные волосы
+        for (let y = 25; y < 140; y++) {
+            for (let x = 75; x < 125; x++) {
+                const dx = (x - centerX) / 25;
+                const dy = (y - centerY + 20) / 60;
+                if (dx * dx + dy * dy < 1 && y < 135) {
+                    pixel(x, y, 1);
+                }
+            }
+        }
+    } else if (style === 'ponytail') {
+        // Хвост
+        for (let y = 25; y < 100; y++) {
+            for (let x = 75; x < 125; x++) {
+                const dx = (x - centerX) / 25;
+                const dy = (y - centerY + 20) / 40;
+                if (dx * dx + dy * dy < 1 && y < 95) {
+                    pixel(x, y, 1);
+                }
+            }
+        }
+        // Хвост сзади
+        for (let y = 100; y < 140; y++) {
+            for (let x = 95; x < 105; x++) {
+                pixel(x, y, 1);
+            }
+        }
+    } else if (style === 'bun') {
+        // Пучок
+        for (let y = 25; y < 100; y++) {
+            for (let x = 75; x < 125; x++) {
+                const dx = (x - centerX) / 25;
+                const dy = (y - centerY + 20) / 40;
+                if (dx * dx + dy * dy < 1 && y < 95) {
+                    pixel(x, y, 1);
+                }
+            }
+        }
+        // Пучок сверху
+        for (let y = 20; y < 35; y++) {
+            for (let x = 90; x < 110; x++) {
+                const dx = (x - centerX) / 10;
+                const dy = (y - 27) / 7;
+                if (dx * dx + dy * dy < 1) {
+                    pixel(x, y, 1);
+                }
+            }
+        }
+    } else if (style === 'mohawk') {
+        // Ирокез
+        for (let y = 25; y < 100; y++) {
+            for (let x = 95; x < 105; x++) {
+                pixel(x, y, 1);
+            }
+        }
+    } else if (style === 'afro') {
+        // Афро
+        for (let y = 25; y < 100; y++) {
+            for (let x = 70; x < 130; x++) {
+                const dx = (x - centerX) / 30;
+                const dy = (y - centerY + 20) / 40;
+                if (dx * dx + dy * dy < 1.2 && y < 95) {
+                    pixel(x, y, 1);
+                }
+            }
+        }
+    }
+    // bald - просто не рисуем волосы
+}
+
+// Рисование бровей
+function drawEyebrows(ctx, pixel, type, centerX, centerY) {
+    if (type === 'normal') {
+        // Обычные брови
+        for (let x = 85; x < 100; x++) pixel(x, 60, 1);
+        for (let x = 100; x < 115; x++) pixel(x, 60, 1);
+    } else if (type === 'thick') {
+        // Толстые брови
+        for (let x = 85; x < 100; x++) {
+            pixel(x, 59, 1);
+            pixel(x, 60, 1);
+        }
+        for (let x = 100; x < 115; x++) {
+            pixel(x, 59, 1);
+            pixel(x, 60, 1);
+        }
+    } else if (type === 'thin') {
+        // Тонкие брови
+        for (let x = 88; x < 97; x++) pixel(x, 60, 1);
+        for (let x = 103; x < 112; x++) pixel(x, 60, 1);
+    } else if (type === 'angry') {
+        // Сердитые брови
+        for (let x = 85; x < 100; x++) pixel(x, 58, 1);
+        for (let x = 100; x < 115; x++) pixel(x, 58, 1);
+    }
+}
+
+// Рисование глаз
+function drawEyes(ctx, pixel, type, centerX, centerY) {
+    const eyeColor = ctx.fillStyle;
+    
+    if (type === 'normal' || type === 'big') {
+        // Обычные/большие глаза
+        const size = type === 'big' ? 2 : 1;
+        // Левый глаз
+        for (let x = 88; x < 95; x++) {
+            for (let y = 68; y < 75; y++) {
+                pixel(x, y, size);
+            }
+        }
+        // Правый глаз
+        for (let x = 105; x < 112; x++) {
+            for (let y = 68; y < 75; y++) {
+                pixel(x, y, size);
+            }
+        }
+        // Зрачки
+        ctx.fillStyle = '#000';
+        pixel(91, 71, 1);
+        pixel(108, 71, 1);
+        ctx.fillStyle = eyeColor;
+    } else if (type === 'small') {
+        // Маленькие глаза
+        for (let x = 90; x < 93; x++) {
+            for (let y = 69; y < 72; y++) {
+                pixel(x, y, 1);
+            }
+        }
+        for (let x = 107; x < 110; x++) {
+            for (let y = 69; y < 72; y++) {
+                pixel(x, y, 1);
+            }
+        }
+        ctx.fillStyle = '#000';
+        pixel(91, 70, 1);
+        pixel(108, 70, 1);
+        ctx.fillStyle = eyeColor;
+    } else if (type === 'closed') {
+        // Закрытые глаза
+        for (let x = 88; x < 95; x++) pixel(x, 71, 1);
+        for (let x = 105; x < 112; x++) pixel(x, 71, 1);
+    } else if (type === 'wink') {
+        // Подмигивание
+        // Левый глаз закрыт
+        for (let x = 88; x < 95; x++) pixel(x, 71, 1);
+        // Правый глаз открыт
+        for (let x = 105; x < 112; x++) {
+            for (let y = 68; y < 75; y++) {
+                pixel(x, y, 1);
+            }
+        }
+        ctx.fillStyle = '#000';
+        pixel(108, 71, 1);
+        ctx.fillStyle = eyeColor;
+    }
+}
+
+// Рисование носа
+function drawNose(ctx, pixel, type, centerX, centerY) {
+    if (type === 'normal') {
+        // Обычный нос
+        pixel(98, 80, 1);
+        pixel(102, 80, 1);
+        pixel(100, 82, 1);
+    } else if (type === 'small') {
+        // Маленький нос
+        pixel(100, 80, 1);
+    } else if (type === 'big') {
+        // Большой нос
+        pixel(97, 79, 1);
+        pixel(103, 79, 1);
+        pixel(98, 81, 1);
+        pixel(102, 81, 1);
+        pixel(100, 83, 1);
+    }
+}
+
+// Рисование рта
+function drawMouth(ctx, pixel, type, centerX, centerY) {
+    if (type === 'smile') {
+        // Улыбка
+        for (let x = 95; x < 105; x++) {
+            const y = 88 + Math.floor(Math.sin((x - 100) * 0.3) * 2);
+            pixel(x, y, 1);
+        }
+    } else if (type === 'neutral') {
+        // Нейтральный
+        for (let x = 96; x < 104; x++) pixel(x, 88, 1);
+    } else if (type === 'open') {
+        // Открытый рот
+        for (let x = 96; x < 104; x++) {
+            pixel(x, 87, 1);
+            pixel(x, 88, 1);
+            pixel(x, 89, 1);
+        }
+    } else if (type === 'bigSmile') {
+        // Широкая улыбка
+        for (let x = 93; x < 107; x++) {
+            const y = 88 + Math.floor(Math.sin((x - 100) * 0.25) * 3);
+            pixel(x, y, 1);
+        }
+    }
+}
+
+// Рендеринг UI кастомизации
+function renderCustomizationUI(player) {
+    const cust = player.customization;
+    
+    // Рендерим вкладки лица
+    renderFaceCustomization(player, cust);
+    
+    // Рендерим вкладки волос
+    renderHairCustomization(player, cust);
+    
+    // Рендерим вкладки одежды
+    renderClothingCustomization(player, cust);
+    
+    // Аксессуары (старая система)
     const accessoriesList = document.getElementById('accessoriesList');
     if (accessoriesList) {
         accessoriesList.innerHTML = '';
         const allAccessories = [
             { id: 'none', name: 'Нет', price: 0 },
-            ...(gameData.shopItems.cosmetics || [])
+            ...(gameData.shopItems?.cosmetics || [])
         ];
         
         allAccessories.forEach(acc => {
             const item = document.createElement('div');
-            const isOwned = acc.price === 0 || (player.accessories && player.accessories.includes(acc.id));
-            const isEquipped = player.accessories && player.accessories.includes(acc.id);
+            const isOwned = acc.price === 0 || (cust.accessories && cust.accessories.includes(acc.id));
+            const isEquipped = cust.accessories && cust.accessories.includes(acc.id);
             
             item.className = `accessory-item ${isOwned ? 'owned' : ''} ${isEquipped ? 'equipped' : ''}`;
             item.textContent = acc.name;
             
             if (isOwned) {
                 item.addEventListener('click', () => {
-                    if (!player.accessories) player.accessories = [];
+                    if (!cust.accessories) cust.accessories = [];
                     
                     if (isEquipped) {
-                        player.accessories = player.accessories.filter(a => a !== acc.id);
+                        cust.accessories = cust.accessories.filter(a => a !== acc.id);
                     } else {
                         if (acc.id !== 'none') {
-                            player.accessories.push(acc.id);
+                            cust.accessories.push(acc.id);
                         }
                     }
                     renderCharacter();
@@ -1502,6 +2612,306 @@ function renderCharacter() {
             }
             
             accessoriesList.appendChild(item);
+        });
+    }
+}
+
+// Рендеринг кастомизации лица
+function renderFaceCustomization(player, cust) {
+    const container = document.getElementById('faceCustomization');
+    if (!container) return;
+    
+    // Получаем активную вкладку
+    const activeTab = container.getAttribute('data-active-tab') || 'skin';
+    container.setAttribute('data-active-tab', activeTab);
+    
+    container.innerHTML = '';
+    
+    if (activeTab === 'skin') {
+        // Цвет кожи
+        const skinColors = ['#FDBCB4', '#F1C27D', '#E0AC69', '#C68642', '#8D5524', '#654321'];
+        skinColors.forEach(color => {
+            const option = document.createElement('div');
+            option.className = `color-option ${cust.face.skinColor === color ? 'selected' : ''}`;
+            option.style.background = color;
+            option.addEventListener('click', () => {
+                cust.face.skinColor = color;
+                renderCharacter();
+                saveGameData();
+            });
+            container.appendChild(option);
+        });
+    } else if (activeTab === 'eyes') {
+        // Тип и цвет глаз
+        const eyeTypes = [
+            { id: 'normal', name: 'Обычные' },
+            { id: 'big', name: 'Большие' },
+            { id: 'small', name: 'Маленькие' },
+            { id: 'closed', name: 'Закрытые' },
+            { id: 'wink', name: 'Подмигивание' }
+        ];
+        
+        eyeTypes.forEach(type => {
+            const option = document.createElement('div');
+            option.className = `style-option ${cust.face.eyeType === type.id ? 'selected' : ''}`;
+            option.textContent = type.name;
+            option.addEventListener('click', () => {
+                cust.face.eyeType = type.id;
+                renderCharacter();
+                saveGameData();
+            });
+            container.appendChild(option);
+        });
+        
+        const colorLabel = document.createElement('div');
+        colorLabel.className = 'custom-label';
+        colorLabel.textContent = 'Цвет глаз:';
+        colorLabel.style.marginTop = '15px';
+        container.appendChild(colorLabel);
+        
+        const eyeColors = ['#4A90E2', '#2E7D32', '#8B4513', '#000000', '#FFD700', '#FF69B4'];
+        eyeColors.forEach(color => {
+            const option = document.createElement('div');
+            option.className = `color-option ${cust.face.eyeColor === color ? 'selected' : ''}`;
+            option.style.background = color;
+            option.addEventListener('click', () => {
+                cust.face.eyeColor = color;
+                renderCharacter();
+                saveGameData();
+            });
+            container.appendChild(option);
+        });
+    } else if (activeTab === 'eyebrows') {
+        const eyebrowTypes = [
+            { id: 'normal', name: 'Обычные' },
+            { id: 'thick', name: 'Толстые' },
+            { id: 'thin', name: 'Тонкие' },
+            { id: 'angry', name: 'Сердитые' }
+        ];
+        
+        eyebrowTypes.forEach(type => {
+            const option = document.createElement('div');
+            option.className = `style-option ${cust.face.eyebrowType === type.id ? 'selected' : ''}`;
+            option.textContent = type.name;
+            option.addEventListener('click', () => {
+                cust.face.eyebrowType = type.id;
+                renderCharacter();
+                saveGameData();
+            });
+            container.appendChild(option);
+        });
+    } else if (activeTab === 'nose') {
+        const noseTypes = [
+            { id: 'normal', name: 'Обычный' },
+            { id: 'small', name: 'Маленький' },
+            { id: 'big', name: 'Большой' }
+        ];
+        
+        noseTypes.forEach(type => {
+            const option = document.createElement('div');
+            option.className = `style-option ${cust.face.noseType === type.id ? 'selected' : ''}`;
+            option.textContent = type.name;
+            option.addEventListener('click', () => {
+                cust.face.noseType = type.id;
+                renderCharacter();
+                saveGameData();
+            });
+            container.appendChild(option);
+        });
+    } else if (activeTab === 'mouth') {
+        const mouthTypes = [
+            { id: 'smile', name: 'Улыбка' },
+            { id: 'neutral', name: 'Нейтральный' },
+            { id: 'open', name: 'Открытый' },
+            { id: 'bigSmile', name: 'Широкая улыбка' }
+        ];
+        
+        mouthTypes.forEach(type => {
+            const option = document.createElement('div');
+            option.className = `style-option ${cust.face.mouthType === type.id ? 'selected' : ''}`;
+            option.textContent = type.name;
+            option.addEventListener('click', () => {
+                cust.face.mouthType = type.id;
+                renderCharacter();
+                saveGameData();
+            });
+            container.appendChild(option);
+        });
+    }
+}
+
+// Рендеринг кастомизации волос
+function renderHairCustomization(player, cust) {
+    const container = document.getElementById('hairCustomization');
+    if (!container) return;
+    
+    const activeTab = container.getAttribute('data-active-tab') || 'hairStyle';
+    container.setAttribute('data-active-tab', activeTab);
+    
+    container.innerHTML = '';
+    
+    if (activeTab === 'hairStyle') {
+        const hairStyles = [
+            { id: 'short', name: 'Короткие' },
+            { id: 'medium', name: 'Средние' },
+            { id: 'long', name: 'Длинные' },
+            { id: 'ponytail', name: 'Хвост' },
+            { id: 'bun', name: 'Пучок' },
+            { id: 'mohawk', name: 'Ирокез' },
+            { id: 'afro', name: 'Афро' },
+            { id: 'bald', name: 'Лысый' }
+        ];
+        
+        hairStyles.forEach(style => {
+            const option = document.createElement('div');
+            option.className = `style-option ${cust.hair.style === style.id ? 'selected' : ''}`;
+            option.textContent = style.name;
+            option.addEventListener('click', () => {
+                cust.hair.style = style.id;
+                renderCharacter();
+                saveGameData();
+            });
+            container.appendChild(option);
+        });
+    } else if (activeTab === 'hairColor') {
+        const hairColors = ['#8B4513', '#000000', '#FFD700', '#FF69B4', '#00CED1', '#FF4500', '#FFFFFF', '#654321'];
+        hairColors.forEach(color => {
+            const option = document.createElement('div');
+            option.className = `color-option ${cust.hair.color === color ? 'selected' : ''}`;
+            option.style.background = color;
+            option.addEventListener('click', () => {
+                cust.hair.color = color;
+                renderCharacter();
+                saveGameData();
+            });
+            container.appendChild(option);
+        });
+    }
+}
+
+// Рендеринг кастомизации одежды
+function renderClothingCustomization(player, cust) {
+    const container = document.getElementById('clothingCustomization');
+    if (!container) return;
+    
+    const activeTab = container.getAttribute('data-active-tab') || 'top';
+    container.setAttribute('data-active-tab', activeTab);
+    
+    container.innerHTML = '';
+    
+    if (activeTab === 'top') {
+        const topTypes = [
+            { id: 'tshirt', name: 'Футболка' },
+            { id: 'shirt', name: 'Рубашка' },
+            { id: 'tank', name: 'Майка' },
+            { id: 'dress', name: 'Платье' },
+            { id: 'jacket', name: 'Куртка' }
+        ];
+        
+        topTypes.forEach(type => {
+            const option = document.createElement('div');
+            option.className = `style-option ${cust.clothing.top === type.id ? 'selected' : ''}`;
+            option.textContent = type.name;
+            option.addEventListener('click', () => {
+                cust.clothing.top = type.id;
+                renderCharacter();
+                saveGameData();
+            });
+            container.appendChild(option);
+        });
+        
+        const colorLabel = document.createElement('div');
+        colorLabel.className = 'custom-label';
+        colorLabel.textContent = 'Цвет верха:';
+        colorLabel.style.marginTop = '15px';
+        container.appendChild(colorLabel);
+        
+        const topColors = ['#3498db', '#e91e63', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e74c3c', '#34495e'];
+        topColors.forEach(color => {
+            const option = document.createElement('div');
+            option.className = `color-option ${cust.clothing.topColor === color ? 'selected' : ''}`;
+            option.style.background = color;
+            option.addEventListener('click', () => {
+                cust.clothing.topColor = color;
+                renderCharacter();
+                saveGameData();
+            });
+            container.appendChild(option);
+        });
+    } else if (activeTab === 'bottom') {
+        const bottomTypes = [
+            { id: 'pants', name: 'Штаны' },
+            { id: 'shorts', name: 'Шорты' },
+            { id: 'skirt', name: 'Юбка' }
+        ];
+        
+        bottomTypes.forEach(type => {
+            const option = document.createElement('div');
+            option.className = `style-option ${cust.clothing.bottom === type.id ? 'selected' : ''}`;
+            option.textContent = type.name;
+            option.addEventListener('click', () => {
+                cust.clothing.bottom = type.id;
+                renderCharacter();
+                saveGameData();
+            });
+            container.appendChild(option);
+        });
+        
+        const colorLabel = document.createElement('div');
+        colorLabel.className = 'custom-label';
+        colorLabel.textContent = 'Цвет низа:';
+        colorLabel.style.marginTop = '15px';
+        container.appendChild(colorLabel);
+        
+        const bottomColors = ['#2c3e50', '#34495e', '#7f8c8d', '#95a5a6', '#bdc3c7', '#ecf0f1', '#3498db', '#e74c3c'];
+        bottomColors.forEach(color => {
+            const option = document.createElement('div');
+            option.className = `color-option ${cust.clothing.bottomColor === color ? 'selected' : ''}`;
+            option.style.background = color;
+            option.addEventListener('click', () => {
+                cust.clothing.bottomColor = color;
+                renderCharacter();
+                saveGameData();
+            });
+            container.appendChild(option);
+        });
+    } else if (activeTab === 'shoes') {
+        const shoeTypes = [
+            { id: 'sneakers', name: 'Кроссовки' },
+            { id: 'boots', name: 'Ботинки' },
+            { id: 'sandals', name: 'Сандалии' },
+            { id: 'heels', name: 'Каблуки' }
+        ];
+        
+        shoeTypes.forEach(type => {
+            const option = document.createElement('div');
+            option.className = `style-option ${cust.clothing.shoes === type.id ? 'selected' : ''}`;
+            option.textContent = type.name;
+            option.addEventListener('click', () => {
+                cust.clothing.shoes = type.id;
+                renderCharacter();
+                saveGameData();
+            });
+            container.appendChild(option);
+        });
+        
+        const colorLabel = document.createElement('div');
+        colorLabel.className = 'custom-label';
+        colorLabel.textContent = 'Цвет обуви:';
+        colorLabel.style.marginTop = '15px';
+        container.appendChild(colorLabel);
+        
+        const shoeColors = ['#1a1a1a', '#2c3e50', '#7f8c8d', '#8B4513', '#e74c3c', '#3498db', '#f39c12', '#FFFFFF'];
+        shoeColors.forEach(color => {
+            const option = document.createElement('div');
+            option.className = `color-option ${cust.clothing.shoesColor === color ? 'selected' : ''}`;
+            option.style.background = color;
+            option.addEventListener('click', () => {
+                cust.clothing.shoesColor = color;
+                renderCharacter();
+                saveGameData();
+            });
+            container.appendChild(option);
         });
     }
 }
@@ -1679,27 +3089,47 @@ function renderReports() {
         }
     }
     
-    // Заполняем список достижений для выбора
+    // Заполняем список достижений для выбора (только те, что в процессе выполнения в режиме соревнования)
     const achievementSelect = document.getElementById('reportAchievementSelect');
     if (achievementSelect) {
         achievementSelect.innerHTML = '<option value="">-- Выберите достижение --</option>';
         
-        // Стандартные достижения
-        gameData.achievements.forEach(achievement => {
-            const option = document.createElement('option');
-            option.value = achievement.id;
-            option.textContent = achievement.name;
-            achievementSelect.appendChild(option);
-        });
-        
-        // Пользовательские достижения
-        if (player.customAchievements && player.customAchievements.length > 0) {
-            player.customAchievements.forEach(achievement => {
+        if (gameData.gameMode === 'competition') {
+            // В режиме соревнования показываем только достижения в процессе выполнения
+            if (player.inProgressAchievements && player.inProgressAchievements.length > 0) {
+                player.inProgressAchievements.forEach(ipa => {
+                    // Ищем достижение
+                    let achievement = gameData.achievements.find(a => a.id === ipa.id);
+                    if (!achievement && player.customAchievements) {
+                        achievement = player.customAchievements.find(a => a.id === ipa.id);
+                    }
+                    
+                    if (achievement) {
+                        const option = document.createElement('option');
+                        option.value = achievement.id;
+                        option.textContent = achievement.name + (achievement.isCustom ? ' (✏️)' : '');
+                        achievementSelect.appendChild(option);
+                    }
+                });
+            }
+        } else {
+            // В одиночной игре показываем все достижения
+            gameData.achievements.forEach(achievement => {
                 const option = document.createElement('option');
                 option.value = achievement.id;
-                option.textContent = achievement.name + ' (✏️)';
+                option.textContent = achievement.name;
                 achievementSelect.appendChild(option);
             });
+            
+            // Пользовательские достижения
+            if (player.customAchievements && player.customAchievements.length > 0) {
+                player.customAchievements.forEach(achievement => {
+                    const option = document.createElement('option');
+                    option.value = achievement.id;
+                    option.textContent = achievement.name + ' (✏️)';
+                    achievementSelect.appendChild(option);
+                });
+            }
         }
     }
     
@@ -1754,6 +3184,12 @@ function renderReports() {
                 <div class="report-actions">
                     <button class="btn-success" onclick="approveReport('${report.id}')">✅ Одобрить</button>
                     <button class="btn-danger" onclick="rejectReport('${report.id}')">❌ Отклонить</button>
+                </div>
+            ` : ''}
+            ${report.rejectionReason ? `
+                <div class="rejection-reason-box">
+                    <strong>❌ Причина отклонения:</strong>
+                    <p>${report.rejectionReason}</p>
                 </div>
             ` : ''}
             ${report.reviewedBy && isCompetition ? `
@@ -1857,6 +3293,26 @@ function createReport(achievement, photoData) {
         gameData.reports = [];
     }
     
+    // В режиме соревнования проверяем, что достижение в процессе выполнения
+    if (gameData.gameMode === 'competition') {
+        if (!player.inProgressAchievements || 
+            !player.inProgressAchievements.find(ipa => ipa.id === achievement.id)) {
+            showNotification('Сначала начните выполнение достижения!');
+            return;
+        }
+        
+        // Удаляем старые отклоненные отчеты для этого достижения
+        gameData.reports = gameData.reports.filter(r => 
+            !(r.achievementId === achievement.id && r.playerId === gameData.currentPlayerId && r.status === 'rejected')
+        );
+        
+        // Обновляем статус в процессе выполнения
+        const inProgress = player.inProgressAchievements.find(ipa => ipa.id === achievement.id);
+        if (inProgress) {
+            inProgress.reportSent = true;
+        }
+    }
+    
     const report = {
         id: `report_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         playerId: gameData.currentPlayerId,
@@ -1866,12 +3322,15 @@ function createReport(achievement, photoData) {
         photo: photoData,
         timestamp: new Date().toISOString(),
         status: gameData.gameMode === 'competition' ? 'pending' : 'archived',
-        reviewedBy: null
+        reviewedBy: null,
+        rejectionReason: null,
+        rejectedAt: null
     };
     
     gameData.reports.push(report);
     saveGameData();
     renderReports();
+    renderAchievements();
     
     // Очищаем форму
     const achievementSelect = document.getElementById('reportAchievementSelect');
@@ -1896,9 +3355,104 @@ function approveReport(reportId) {
     report.status = 'approved';
     report.reviewedBy = gameData.currentPlayerId;
     
+    // Начисляем награды игроку, который выполнил достижение
+    const targetPlayer = report.playerId === 'player1' ? gameData.player : gameData.player2;
+    
+    if (!targetPlayer) {
+        console.error('Target player not found');
+        return;
+    }
+    
+    // Ищем достижение для получения наград
+    let achievement = gameData.achievements.find(a => a.id === report.achievementId);
+    if (!achievement && targetPlayer.customAchievements) {
+        achievement = targetPlayer.customAchievements.find(a => a.id === report.achievementId);
+    }
+    
+    if (!achievement) {
+        console.error('Achievement not found');
+        return;
+    }
+    
+    const rewards = gameData.achievementRewards[achievement.difficulty];
+    if (!rewards) {
+        console.error('Rewards not found');
+        return;
+    }
+    
+    // Сохраняем текущего игрока
+    const currentPlayer = getCurrentPlayer();
+    const wasCurrentPlayer = currentPlayer === targetPlayer;
+    const oldPlayerId = gameData.currentPlayerId;
+    
+    // Временно переключаемся на игрока для начисления наград
+    gameData.currentPlayerId = report.playerId;
+    
+    // Добавляем опыт
+    addXP(rewards.xp);
+    
+    // Добавляем монеты
+    if (targetPlayer.coins === undefined || targetPlayer.coins === null) {
+        targetPlayer.coins = 0;
+    }
+    targetPlayer.coins += rewards.coins;
+    
+    // Начисляем урон
+    const totalStats = calculateTotalStats(targetPlayer);
+    const baseDamage = rewards.damage;
+    const attackBonus = totalStats.attack;
+    const totalDamage = baseDamage + attackBonus;
+    const isCrit = Math.random() * 100 < totalStats.crit;
+    const finalDamage = isCrit ? Math.floor(totalDamage * 1.5) : totalDamage;
+    
+    if (targetPlayer.accumulatedDamage === undefined || targetPlayer.accumulatedDamage === null) {
+        targetPlayer.accumulatedDamage = 0;
+    }
+    targetPlayer.accumulatedDamage += finalDamage;
+    
+    // Возвращаем текущего игрока
+    gameData.currentPlayerId = oldPlayerId;
+    
+    // Отмечаем достижение как выполненное
+    if (!targetPlayer.completedAchievements) {
+        targetPlayer.completedAchievements = [];
+    }
+    
+    const timestamp = new Date().toISOString();
+    const existingIndex = targetPlayer.completedAchievements.findIndex(ca => ca.id === report.achievementId);
+    if (existingIndex >= 0) {
+        targetPlayer.completedAchievements[existingIndex] = {
+            id: report.achievementId,
+            date: new Date().toISOString().split('T')[0],
+            timestamp: timestamp,
+            difficulty: achievement.difficulty
+        };
+    } else {
+        targetPlayer.completedAchievements.push({
+            id: report.achievementId,
+            date: new Date().toISOString().split('T')[0],
+            timestamp: timestamp,
+            difficulty: achievement.difficulty
+        });
+    }
+    
+    // Удаляем из процесса выполнения
+    if (targetPlayer.inProgressAchievements) {
+        targetPlayer.inProgressAchievements = targetPlayer.inProgressAchievements.filter(
+            ipa => ipa.id !== report.achievementId
+        );
+    }
+    
+    // Обновляем интерфейс если это текущий игрок
+    if (wasCurrentPlayer) {
+        updatePlayerStats();
+        renderCombat();
+    }
+    
     saveGameData();
     renderReports();
-    showNotification('✅ Отчет одобрен!');
+    renderAchievements();
+    showNotification('✅ Отчет одобрен! Награды начислены.');
 }
 
 // Отклонение отчета
@@ -1906,12 +3460,63 @@ function rejectReport(reportId) {
     const report = gameData.reports.find(r => r.id === reportId);
     if (!report) return;
     
+    // Показываем модальное окно для ввода причины отклонения
+    const rejectModal = document.createElement('div');
+    rejectModal.className = 'modal active';
+    rejectModal.style.zIndex = '2000';
+    rejectModal.innerHTML = `
+        <div class="modal-content reject-modal">
+            <h2>❌ Отклонить отчет</h2>
+            <p><strong>Достижение:</strong> ${report.achievementName}</p>
+            <div class="form-group">
+                <label>Причина отклонения:</label>
+                <textarea id="rejectionReason" class="form-textarea" placeholder="Опишите причину отклонения..." maxlength="500"></textarea>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-secondary" onclick="this.closest('.modal').remove()">Отмена</button>
+                <button class="btn-danger" onclick="confirmRejectReport('${reportId}')">Отклонить</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(rejectModal);
+    
+    // Закрытие при клике вне модального окна
+    rejectModal.addEventListener('click', (e) => {
+        if (e.target === rejectModal) {
+            rejectModal.remove();
+        }
+    });
+}
+
+// Подтверждение отклонения отчета с причиной
+function confirmRejectReport(reportId) {
+    const reasonInput = document.getElementById('rejectionReason');
+    const reason = reasonInput ? reasonInput.value.trim() : '';
+    
+    if (!reason) {
+        showNotification('Пожалуйста, укажите причину отклонения!');
+        return;
+    }
+    
+    const report = gameData.reports.find(r => r.id === reportId);
+    if (!report) return;
+    
     report.status = 'rejected';
     report.reviewedBy = gameData.currentPlayerId;
+    report.rejectionReason = reason;
+    report.rejectedAt = new Date().toISOString();
+    
+    // Закрываем модальное окно
+    const rejectModal = document.querySelector('.reject-modal')?.closest('.modal');
+    if (rejectModal) {
+        rejectModal.remove();
+    }
     
     saveGameData();
     renderReports();
-    showNotification('❌ Отчет отклонен!');
+    renderAchievements();
+    showNotification('❌ Отчет отклонен. Партнер получит уведомление с причиной.');
 }
 
 // Просмотр фото в полном размере
@@ -2365,6 +3970,41 @@ window.removePhotoPreview = removePhotoPreview;
 window.equipItem = equipItem;
 window.unequipItem = unequipItem;
 window.unlockLocation = unlockLocation;
+window.startAchievement = startAchievement;
+window.openReportModal = openReportModal;
+window.cancelAchievement = cancelAchievement;
+window.restartAchievement = restartAchievement;
+window.confirmRejectReport = confirmRejectReport;
+window.copyPlayerId = copyPlayerId;
+window.addFriend = addFriend;
+window.removeFriend = removeFriend;
+window.playWithFriend = playWithFriend;
+window.selectFriendAsPartner = selectFriendAsPartner;
+
+// Инициализация обработчиков вкладок кастомизации после загрузки DOM
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+        document.querySelectorAll('.custom-tab-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const tabName = btn.getAttribute('data-tab');
+                const section = btn.closest('.custom-section');
+                
+                if (!section) return;
+                
+                // Убираем активность у всех вкладок в этой секции
+                section.querySelectorAll('.custom-tab-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                
+                // Обновляем активную вкладку в контейнере
+                const container = section.querySelector('.customization-content');
+                if (container) {
+                    container.setAttribute('data-active-tab', tabName);
+                    renderCharacter(); // Перерисовываем UI
+                }
+            });
+        });
+    }, 100);
+});
 
 // Инициализация при загрузке страницы
 document.addEventListener('DOMContentLoaded', initGame);
