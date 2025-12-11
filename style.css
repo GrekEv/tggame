@@ -1746,6 +1746,33 @@ body {
     transform: scale(1.05);
 }
 
+.report-video {
+    max-width: 100%;
+    max-height: 300px;
+    border-radius: 8px;
+    border: 2px solid #34495e;
+    cursor: pointer;
+    transition: transform 0.3s;
+    user-select: none;
+    background: #000;
+}
+
+.report-video:active {
+    transform: scale(0.98);
+}
+
+.report-video:hover {
+    transform: scale(1.02);
+}
+
+.video-preview {
+    max-width: 200px;
+    max-height: 200px;
+    border-radius: 8px;
+    border: 2px solid #34495e;
+    background: #000;
+}
+
 .report-no-photo {
     padding: 20px;
     text-align: center;

@@ -75,6 +75,8 @@ const gameData = {
     // Система друзей
     friends: [], // Список друзей
     // Структура друга: { id: playerId, name: имя, telegramId: telegram id (если есть), addedAt: timestamp }
+    friendRequests: [], // Заявки в друзья
+    // Структура заявки: { id: requestId, friendId: ID друга, status: 'pending'|'accepted'|'rejected', sentAt: timestamp }
     
     // Общие данные для режима соревнования
     sharedBosses: [], // Общий список побежденных боссов в режиме соревнования
@@ -632,7 +634,8 @@ function saveGameData() {
             // Общий опыт (сумма опыта обоих игроков)
             sharedXP: (gameData.player.xp || 0) + (gameData.player2?.xp || 0)
         } : null,
-        friends: gameData.friends || []
+        friends: gameData.friends || [],
+        friendRequests: gameData.friendRequests || []
     };
     
     try {
@@ -1118,28 +1121,79 @@ function addFriend() {
         return;
     }
     
-    // Ищем данные друга в системе (если он зарегистрирован)
-    // В реальной системе здесь был бы запрос к серверу, но так как все локально,
-    // мы просто добавляем друга с базовой информацией
-    const newFriend = {
-        id: friendId,
-        name: `Друг (${friendId})`,
-        telegramId: null, // Можно добавить позже если будет синхронизация
-        addedAt: new Date().toISOString()
-    };
-    
-    if (!gameData.friends) {
-        gameData.friends = [];
+    // Проверяем, не отправлена ли уже заявка этому другу
+    if (gameData.friendRequests && gameData.friendRequests.find(r => r.friendId === friendId && r.status === 'pending')) {
+        showNotification('Заявка этому другу уже отправлена!');
+        friendIdInput.value = '';
+        return;
     }
     
-    gameData.friends.push(newFriend);
+    // Создаем заявку в друзья
+    if (!gameData.friendRequests) {
+        gameData.friendRequests = [];
+    }
+    
+    const newRequest = {
+        id: `request_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        friendId: friendId,
+        status: 'pending',
+        sentAt: new Date().toISOString()
+    };
+    
+    gameData.friendRequests.push(newRequest);
     
     // Очищаем поле ввода
     friendIdInput.value = '';
     
     saveGameData();
     renderFriends();
-    showNotification(`✅ Друг ${friendId} добавлен!`);
+    showNotification(`📤 Заявка в друзья отправлена ${friendId}!`);
+}
+
+// Отмена заявки в друзья
+function cancelFriendRequest(requestId) {
+    if (!gameData.friendRequests) return;
+    
+    const request = gameData.friendRequests.find(r => r.id === requestId);
+    if (!request) return;
+    
+    gameData.friendRequests = gameData.friendRequests.filter(r => r.id !== requestId);
+    
+    saveGameData();
+    renderFriends();
+    showNotification('✅ Заявка отменена');
+}
+
+// Принятие заявки в друзья (для будущего использования, если будет система подтверждения)
+function acceptFriendRequest(requestId) {
+    if (!gameData.friendRequests) return;
+    
+    const request = gameData.friendRequests.find(r => r.id === requestId);
+    if (!request) return;
+    
+    // Обновляем статус заявки
+    request.status = 'accepted';
+    
+    // Добавляем друга в список друзей
+    if (!gameData.friends) {
+        gameData.friends = [];
+    }
+    
+    // Проверяем, не добавлен ли уже этот друг
+    if (!gameData.friends.find(f => f.id === request.friendId)) {
+        const newFriend = {
+            id: request.friendId,
+            name: `Друг (${request.friendId})`,
+            telegramId: null,
+            addedAt: new Date().toISOString()
+        };
+        
+        gameData.friends.push(newFriend);
+    }
+    
+    saveGameData();
+    renderFriends();
+    showNotification(`✅ Заявка от ${request.friendId} принята!`);
 }
 
 // Удаление друга
@@ -1334,6 +1388,26 @@ function switchTab(tabName) {
     // Если переключились на вкладку отчетов, обновляем список
     if (tabName === 'reports') {
         renderReports();
+    }
+    
+    // Если переключились на вкладку персонажа, обновляем отображение
+    if (tabName === 'character') {
+        renderCharacter();
+    }
+    
+    // Если переключились на вкладку экипировки, обновляем список
+    if (tabName === 'equipment') {
+        renderEquipment();
+    }
+    
+    // Если переключились на вкладку магазина, обновляем список
+    if (tabName === 'shop') {
+        renderShop();
+    }
+    
+    // Если переключились на вкладку боссов, обновляем список
+    if (tabName === 'bosses') {
+        renderBosses();
     }
 }
 
@@ -2317,8 +2391,13 @@ function renderCharacter() {
     
     // Обновляем отображение ID в личном кабинете
     const playerIdDisplay = document.getElementById('playerIdDisplay');
-    if (playerIdDisplay && gameData.playerId) {
-        playerIdDisplay.textContent = gameData.playerId;
+    if (playerIdDisplay) {
+        // Генерируем ID если его нет
+        if (!gameData.playerId) {
+            gameData.playerId = generatePlayerId();
+            saveGameData();
+        }
+        playerIdDisplay.textContent = gameData.playerId || '-';
     }
     
     // Обновляем информацию о Telegram
@@ -3443,11 +3522,16 @@ function renderReports() {
             <div class="report-achievement">
                 <strong>Достижение:</strong> ${report.achievementName}
             </div>
-            ${report.photo ? `
+            ${report.media || report.photo ? `
                 <div class="report-photo-container">
-                    <img src="${report.photo}" alt="Фото отчета" class="report-photo" onclick="viewFullPhoto('${report.id}')" />
+                    ${(report.mediaType === 'video' || (!report.mediaType && report.media && report.media.startsWith('data:video'))) ? `
+                        <video src="${report.media || report.photo}" controls class="report-video" onclick="event.stopPropagation(); viewFullPhoto('${report.id}')" style="max-width: 100%; max-height: 300px; border-radius: 8px; border: 2px solid #34495e; cursor: pointer;"></video>
+                        ${report.videoDuration ? `<div style="font-size: 12px; color: #7f8c8d; margin-top: 5px;">🎥 ${report.videoDuration.toFixed(1)} сек</div>` : ''}
+                    ` : `
+                        <img src="${report.media || report.photo}" alt="Фото отчета" class="report-photo" onclick="viewFullPhoto('${report.id}')" />
+                    `}
                 </div>
-            ` : '<div class="report-no-photo">📷 Фото не прикреплено</div>'}
+            ` : '<div class="report-no-photo">📷 Медиа не прикреплено</div>'}
             ${canReview ? `
                 <div class="report-actions">
                     <button class="btn-success" onclick="approveReport('${report.id}')">✅ Одобрить</button>
@@ -3482,34 +3566,76 @@ function renderReports() {
     });
 }
 
-// Обработка выбора фото
+// Обработка выбора фото или видео
 function handlePhotoSelect(event) {
     const file = event.target.files[0];
     const preview = document.getElementById('reportPhotoPreview');
     
     if (!file || !preview) return;
     
-    if (!file.type.startsWith('image/')) {
-        showNotification('Пожалуйста, выберите изображение!');
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/');
+    
+    if (!isImage && !isVideo) {
+        showNotification('Пожалуйста, выберите изображение или видео!');
         event.target.value = '';
         return;
     }
     
-    // Ограничение размера файла (5MB)
-    if (file.size > 5 * 1024 * 1024) {
-        showNotification('Файл слишком большой! Максимум 5MB.');
+    // Ограничение размера файла (10MB для видео, 5MB для фото)
+    const maxSize = isVideo ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+        showNotification(`Файл слишком большой! Максимум ${isVideo ? '10MB' : '5MB'}.`);
         event.target.value = '';
         return;
     }
     
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        preview.innerHTML = `
-            <img src="${e.target.result}" alt="Предпросмотр" class="photo-preview-img" />
-            <button type="button" class="btn-small btn-remove-photo" onclick="removePhotoPreview()">✕</button>
-        `;
-    };
-    reader.readAsDataURL(file);
+    if (isVideo) {
+        // Проверяем длительность видео
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        
+        video.onloadedmetadata = function() {
+            window.URL.revokeObjectURL(video.src);
+            const duration = video.duration;
+            
+            if (duration > 10) {
+                showNotification('Видео слишком длинное! Максимум 10 секунд.');
+                event.target.value = '';
+                preview.innerHTML = '';
+                return;
+            }
+            
+            // Показываем предпросмотр видео
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                preview.innerHTML = `
+                    <video src="${e.target.result}" controls class="video-preview" style="max-width: 200px; max-height: 200px; border-radius: 8px; border: 2px solid #34495e;"></video>
+                    <div style="margin-top: 5px; font-size: 12px; color: #7f8c8d;">Длительность: ${duration.toFixed(1)} сек</div>
+                    <button type="button" class="btn-small btn-remove-photo" onclick="removePhotoPreview()">✕</button>
+                `;
+            };
+            reader.readAsDataURL(file);
+        };
+        
+        video.onerror = function() {
+            showNotification('Ошибка при загрузке видео!');
+            event.target.value = '';
+            preview.innerHTML = '';
+        };
+        
+        video.src = URL.createObjectURL(file);
+    } else {
+        // Обработка фото
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            preview.innerHTML = `
+                <img src="${e.target.result}" alt="Предпросмотр" class="photo-preview-img" />
+                <button type="button" class="btn-small btn-remove-photo" onclick="removePhotoPreview()">✕</button>
+            `;
+        };
+        reader.readAsDataURL(file);
+    }
 }
 
 // Удаление предпросмотра фото
@@ -3545,27 +3671,67 @@ function sendReport() {
         return;
     }
     
-    // Получаем фото
-    let photoData = null;
-    if (photoInput && photoInput.files && photoInput.files[0]) {
-        const file = photoInput.files[0];
-        if (file.type.startsWith('image/')) {
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                photoData = e.target.result;
-                createReport(achievement, photoData);
-            };
-            reader.readAsDataURL(file);
-            return; // Асинхронная загрузка
-        }
+    // Получаем фото или видео
+    if (!photoInput || !photoInput.files || !photoInput.files[0]) {
+        showNotification('Пожалуйста, прикрепите фото или видео!');
+        return;
     }
     
-    // Если фото нет, создаем отчет сразу
-    createReport(achievement, null);
+    const file = photoInput.files[0];
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/');
+    
+    if (!isImage && !isVideo) {
+        showNotification('Пожалуйста, выберите изображение или видео!');
+        return;
+    }
+    
+    // Проверка размера
+    const maxSize = isVideo ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+        showNotification(`Файл слишком большой! Максимум ${isVideo ? '10MB' : '5MB'}.`);
+        return;
+    }
+    
+    // Для видео проверяем длительность
+    if (isVideo) {
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        
+        video.onloadedmetadata = function() {
+            window.URL.revokeObjectURL(video.src);
+            const duration = video.duration;
+            
+            if (duration > 10) {
+                showNotification('Видео слишком длинное! Максимум 10 секунд.');
+                return;
+            }
+            
+            // Читаем видео
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                createReport(achievement, e.target.result, 'video', duration);
+            };
+            reader.readAsDataURL(file);
+        };
+        
+        video.onerror = function() {
+            showNotification('Ошибка при загрузке видео!');
+        };
+        
+        video.src = URL.createObjectURL(file);
+    } else {
+        // Читаем фото
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            createReport(achievement, e.target.result, 'image');
+        };
+        reader.readAsDataURL(file);
+    }
 }
 
 // Создание отчета
-function createReport(achievement, photoData) {
+function createReport(achievement, mediaData, mediaType = 'image', videoDuration = null) {
     const player = getCurrentPlayer();
     
     if (!gameData.reports) {
@@ -3599,12 +3765,16 @@ function createReport(achievement, photoData) {
         playerName: player.name,
         achievementId: achievement.id,
         achievementName: achievement.name,
-        photo: photoData,
+        media: mediaData, // Медиа данные (фото или видео)
+        mediaType: mediaType, // 'image' или 'video'
+        videoDuration: videoDuration, // Длительность видео в секундах (если видео)
         timestamp: new Date().toISOString(),
         status: gameData.gameMode === 'competition' ? 'pending' : 'archived',
         reviewedBy: null,
         rejectionReason: null,
-        rejectedAt: null
+        rejectedAt: null,
+        // Для обратной совместимости
+        photo: mediaType === 'image' ? mediaData : null
     };
     
     gameData.reports.push(report);
@@ -3761,20 +3931,28 @@ function confirmRejectReport(reportId) {
     showNotification('❌ Отчет отклонен. Партнер получит уведомление с причиной.');
 }
 
-// Просмотр фото в полном размере
+// Просмотр фото или видео в полном размере
 function viewFullPhoto(reportId) {
     const report = gameData.reports.find(r => r.id === reportId);
-    if (!report || !report.photo) return;
+    if (!report || (!report.media && !report.photo)) return;
     
-    // Создаем модальное окно для просмотра фото
+    const mediaData = report.media || report.photo;
+    const isVideo = report.mediaType === 'video' || (!report.mediaType && mediaData && mediaData.startsWith('data:video'));
+    
+    // Создаем модальное окно для просмотра медиа
     const modal = document.createElement('div');
     modal.className = 'modal active';
     modal.style.zIndex = '2000';
     modal.innerHTML = `
         <div class="modal-content photo-viewer-modal">
             <span class="close-photo-viewer" onclick="this.closest('.modal').remove()">&times;</span>
-            <h3>Фото отчета: ${report.achievementName}</h3>
-            <img src="${report.photo}" alt="Фото отчета" class="full-photo-view" />
+            <h3>${isVideo ? '🎥 Видео' : '📷 Фото'} отчета: ${report.achievementName}</h3>
+            ${isVideo ? `
+                <video src="${mediaData}" controls autoplay class="full-photo-view" style="max-width: 90vw; max-height: 80vh; border-radius: 8px; background: #000;"></video>
+                ${report.videoDuration ? `<div style="text-align: center; color: #7f8c8d; margin-top: 5px;">Длительность: ${report.videoDuration.toFixed(1)} сек</div>` : ''}
+            ` : `
+                <img src="${mediaData}" alt="Фото отчета" class="full-photo-view" />
+            `}
             <div class="photo-viewer-info">
                 <p><strong>От:</strong> ${report.playerName}</p>
                 <p><strong>Дата:</strong> ${new Date(report.timestamp).toLocaleString('ru-RU')}</p>
@@ -3784,7 +3962,7 @@ function viewFullPhoto(reportId) {
     
     document.body.appendChild(modal);
     
-    // Закрытие при клике вне фото
+    // Закрытие при клике вне медиа
     modal.addEventListener('click', (e) => {
         if (e.target === modal) {
             modal.remove();
@@ -4224,6 +4402,8 @@ window.cancelAchievement = cancelAchievement;
 window.restartAchievement = restartAchievement;
 window.confirmRejectReport = confirmRejectReport;
 window.copyPlayerId = copyPlayerId;
+window.cancelFriendRequest = cancelFriendRequest;
+window.acceptFriendRequest = acceptFriendRequest;
 window.addFriend = addFriend;
 window.removeFriend = removeFriend;
 window.playWithFriend = playWithFriend;
@@ -4303,6 +4483,33 @@ function updateGameModeDisplay() {
             switchToCompetitionBtn.classList.remove('active');
             switchToCompetitionBtn.disabled = false;
         }
+    }
+    
+    // Обновляем информацию о партнере
+    updatePartnerInfo();
+}
+
+// Обновление информации о партнере в личном кабинете
+function updatePartnerInfo() {
+    const partnerInfo = document.getElementById('partnerInfo');
+    if (!partnerInfo) return;
+    
+    if (gameData.gameMode === 'competition' && gameData.partnerId) {
+        const partnerFriend = gameData.friends.find(f => f.id === gameData.partnerId);
+        const partnerName = partnerFriend ? partnerFriend.name : `Партнер (${gameData.partnerId})`;
+        
+        partnerInfo.style.display = 'block';
+        partnerInfo.innerHTML = `
+            <div style="margin-top: 10px; padding: 10px; background: rgba(102, 126, 234, 0.1); border-radius: 5px; border: 1px solid #667eea;">
+                <strong style="color: #667eea;">👥 Текущий партнер:</strong>
+                <div style="margin-top: 5px;">
+                    <span style="font-weight: bold;">${partnerName}</span>
+                    <div style="font-size: 12px; color: #7f8c8d; margin-top: 3px;">ID: ${gameData.partnerId}</div>
+                </div>
+            </div>
+        `;
+    } else {
+        partnerInfo.style.display = 'none';
     }
 }
 

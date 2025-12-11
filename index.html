@@ -150,6 +150,9 @@
                                     </button>
                                 </div>
                                 <p class="profile-hint" id="currentModeHint">Текущий режим: <span id="currentModeText">-</span></p>
+                                <div id="partnerInfo" class="partner-info" style="display: none;">
+                                    <!-- Информация о партнере будет здесь -->
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -257,8 +260,11 @@
                             </select>
                         </div>
                         <div class="form-group">
-                            <label>Фото отчета:</label>
-                            <input type="file" id="reportPhotoInput" accept="image/*" class="form-input" />
+                            <label>Фото или видео отчета:</label>
+                            <input type="file" id="reportPhotoInput" accept="image/*,video/*" class="form-input" />
+                            <p class="profile-hint" style="font-size: 12px; color: #7f8c8d; margin-top: 5px;">
+                                📷 Фото или 🎥 Видео до 10 секунд (как кружочки в Telegram)
+                            </p>
                             <div id="reportPhotoPreview" class="photo-preview"></div>
                         </div>
                         <button id="sendReportBtn" class="btn-primary">📤 Отправить отчет</button>
