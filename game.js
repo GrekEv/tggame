@@ -78,6 +78,10 @@ const gameData = {
     friendRequests: [], // Заявки в друзья
     // Структура заявки: { id: requestId, friendId: ID друга, status: 'pending'|'accepted'|'rejected', sentAt: timestamp }
     
+    // Система приглашений на партнерство
+    partnerInvitations: [], // Приглашения на партнерство
+    // Структура приглашения: { id: invitationId, fromPlayerId: ID отправителя, fromPlayerName: имя отправителя, toPlayerId: ID получателя, status: 'pending'|'accepted'|'rejected', createdAt: timestamp }
+    
     // Общие данные для режима соревнования
     sharedBosses: [], // Общий список побежденных боссов в режиме соревнования
     
@@ -303,6 +307,7 @@ function loadGameData() {
         if (parsed.playerId !== undefined) gameData.playerId = parsed.playerId;
         if (parsed.telegramUser !== undefined) gameData.telegramUser = parsed.telegramUser;
         if (parsed.partnerId !== undefined) gameData.partnerId = parsed.partnerId;
+        if (parsed.partnerInvitations !== undefined) gameData.partnerInvitations = parsed.partnerInvitations;
         if (parsed.tutorialCompleted !== undefined) gameData.tutorialCompleted = parsed.tutorialCompleted;
         
         // Загружаем режим игры
@@ -327,7 +332,16 @@ function loadGameData() {
             }
         } else if (parsed.player) {
             // Новая структура данных
+            // Сохраняем текущее имя перед загрузкой
+            const currentName = gameData.player.name;
             Object.assign(gameData.player, parsed.player);
+            // Восстанавливаем имя из сохраненных данных, если оно есть
+            if (parsed.player.name !== undefined && parsed.player.name !== null && parsed.player.name !== '') {
+                gameData.player.name = parsed.player.name;
+            } else if (currentName && currentName !== 'Игрок') {
+                // Если в сохраненных данных нет имени, но есть текущее имя, сохраняем его
+                gameData.player.name = currentName;
+            }
             
             // Миграция старых данных кастомизации
             if (!gameData.player.customization) {
@@ -488,7 +502,14 @@ function syncAchievementsFromShared(sharedAchievements) {
 
 // Инициализация данных игрока
 function initPlayerData(player) {
-    if (!player.name) player.name = 'Игрок';
+    // Не перезаписываем имя если оно уже есть
+    if (!player.name || player.name === '' || player.name === 'Игрок') {
+        // Устанавливаем имя по умолчанию только если его действительно нет
+        // Но не перезаписываем существующее имя
+        if (!player.name || player.name === '') {
+            player.name = 'Игрок';
+        }
+    }
     if (!player.completedAchievements) player.completedAchievements = [];
     if (!player.customAchievements) player.customAchievements = [];
     if (!player.inProgressAchievements) player.inProgressAchievements = [];
@@ -537,10 +558,23 @@ function initPlayerData(player) {
 
 // Сохранение данных в localStorage
 function saveGameData() {
+    // Сохраняем имя перед инициализацией, чтобы не потерять его
+    const savedPlayerName = gameData.player.name;
+    
     // Убеждаемся, что все данные инициализированы перед сохранением
     initPlayerData(gameData.player);
+    
+    // Восстанавливаем сохраненное имя если оно было установлено пользователем
+    if (savedPlayerName && savedPlayerName !== 'Игрок' && savedPlayerName !== '' && savedPlayerName !== null && savedPlayerName !== undefined) {
+        gameData.player.name = savedPlayerName;
+    }
+    
     if (gameData.player2) {
+        const savedPlayer2Name = gameData.player2.name;
         initPlayerData(gameData.player2);
+        if (savedPlayer2Name && savedPlayer2Name !== 'Партнер' && savedPlayer2Name !== '' && savedPlayer2Name !== null && savedPlayer2Name !== undefined) {
+            gameData.player2.name = savedPlayer2Name;
+        }
     }
     
     const dataToSave = {
@@ -553,7 +587,7 @@ function saveGameData() {
         currentPlayerId: gameData.currentPlayerId,
         player: {
             ...gameData.player,
-            // Явно сохраняем все важные поля
+            // Явно сохраняем имя - используем текущее значение
             name: gameData.player.name || 'Игрок',
             level: gameData.player.level || 1,
             xp: gameData.player.xp || 0,
@@ -996,6 +1030,9 @@ function selectFriendAsPartner(friendId) {
     const friend = gameData.friends.find(f => f.id === friendId);
     if (!friend) return;
     
+    // Создаем приглашение на партнерство
+    createPartnerInvitation(friendId);
+    
     gameData.partnerId = friendId;
     
     // Закрываем модальное окно
@@ -1007,7 +1044,7 @@ function selectFriendAsPartner(friendId) {
     // Выбираем режим соревнования
     selectGameMode('competition');
     
-    showNotification(`🎮 Подключение к ${friend.name || friendId}...`);
+    showNotification(`📤 Приглашение на партнерство отправлено ${friend.name || friendId}!`);
 }
 
 // Подключение к партнеру
@@ -1027,6 +1064,9 @@ function connectToPartner() {
         return;
     }
     
+    // Создаем приглашение на партнерство
+    createPartnerInvitation(partnerId);
+    
     // Сохраняем ID партнера
     gameData.partnerId = partnerId;
     
@@ -1038,7 +1078,150 @@ function connectToPartner() {
     
     // Выбираем режим соревнования
     selectGameMode('competition');
+    
+    showNotification(`📤 Приглашение на партнерство отправлено игроку ${partnerId}!`);
 }
+
+// Создание приглашения на партнерство
+function createPartnerInvitation(toPlayerId) {
+    if (!gameData.partnerInvitations) {
+        gameData.partnerInvitations = [];
+    }
+    
+    // Проверяем, нет ли уже активного приглашения этому игроку
+    const existingInvitation = gameData.partnerInvitations.find(inv => 
+        inv.toPlayerId === toPlayerId && inv.status === 'pending'
+    );
+    
+    if (existingInvitation) {
+        console.log('Invitation already exists for this player');
+        return;
+    }
+    
+    const invitation = {
+        id: `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        fromPlayerId: gameData.playerId,
+        fromPlayerName: gameData.player.name || 'Игрок',
+        toPlayerId: toPlayerId,
+        status: 'pending',
+        createdAt: new Date().toISOString()
+    };
+    
+    gameData.partnerInvitations.push(invitation);
+    saveGameData();
+    
+    console.log('Partner invitation created:', invitation);
+    
+    // Обновляем отображение приглашений
+    renderPartnerInvitations();
+}
+
+// Рендеринг приглашений на партнерство
+function renderPartnerInvitations() {
+    const container = document.getElementById('partnerInvitations');
+    if (!container) return;
+    
+    if (!gameData.partnerInvitations || gameData.partnerInvitations.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+    
+    // Фильтруем только активные приглашения (pending)
+    const pendingInvitations = gameData.partnerInvitations.filter(inv => inv.status === 'pending');
+    
+    if (pendingInvitations.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+    
+    container.style.display = 'block';
+    container.innerHTML = '<h4 style="margin-top: 15px; margin-bottom: 10px; color: #667eea;">📨 Приглашения на партнерство:</h4>';
+    
+    pendingInvitations.forEach(invitation => {
+        const invitationCard = document.createElement('div');
+        invitationCard.className = 'partner-invitation-card';
+        invitationCard.style.cssText = `
+            background: #f8f9fa;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+        `;
+        
+        invitationCard.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <strong>${invitation.fromPlayerName}</strong> (ID: ${invitation.fromPlayerId})
+                    <div style="font-size: 12px; color: #7f8c8d; margin-top: 5px;">
+                        Приглашение отправлено: ${new Date(invitation.createdAt).toLocaleString('ru-RU')}
+                    </div>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn-success btn-small" onclick="acceptPartnerInvitation('${invitation.id}')">✅ Принять</button>
+                    <button class="btn-danger btn-small" onclick="rejectPartnerInvitation('${invitation.id}')">❌ Отклонить</button>
+                </div>
+            </div>
+        `;
+        
+        container.appendChild(invitationCard);
+    });
+}
+
+// Принятие приглашения на партнерство
+function acceptPartnerInvitation(invitationId) {
+    const invitation = gameData.partnerInvitations.find(inv => inv.id === invitationId);
+    if (!invitation) {
+        showNotification('Приглашение не найдено!');
+        return;
+    }
+    
+    if (invitation.status !== 'pending') {
+        showNotification('Это приглашение уже обработано!');
+        return;
+    }
+    
+    // Устанавливаем партнера
+    gameData.partnerId = invitation.fromPlayerId;
+    
+    // Отмечаем приглашение как принятое
+    invitation.status = 'accepted';
+    invitation.acceptedAt = new Date().toISOString();
+    
+    // Переключаемся в режим соревнования
+    selectGameMode('competition');
+    
+    saveGameData();
+    updatePartnerInfo();
+    
+    showNotification(`✅ Вы приняли приглашение от ${invitation.fromPlayerName}! Теперь вы играете вместе.`);
+}
+
+// Отклонение приглашения на партнерство
+function rejectPartnerInvitation(invitationId) {
+    const invitation = gameData.partnerInvitations.find(inv => inv.id === invitationId);
+    if (!invitation) {
+        showNotification('Приглашение не найдено!');
+        return;
+    }
+    
+    if (invitation.status !== 'pending') {
+        showNotification('Это приглашение уже обработано!');
+        return;
+    }
+    
+    // Отмечаем приглашение как отклоненное
+    invitation.status = 'rejected';
+    invitation.rejectedAt = new Date().toISOString();
+    
+    saveGameData();
+    renderPartnerInvitations();
+    
+    showNotification(`❌ Вы отклонили приглашение от ${invitation.fromPlayerName}.`);
+}
+
+// Экспорт функций для использования в HTML
+window.acceptPartnerInvitation = acceptPartnerInvitation;
+window.rejectPartnerInvitation = rejectPartnerInvitation;
 
 // Копирование ID игрока
 function copyPlayerId() {
@@ -1223,13 +1406,17 @@ function removeFriend(friendId) {
 
 // Играть с другом
 function playWithFriend(friendId) {
+    // Создаем приглашение на партнерство
+    createPartnerInvitation(friendId);
+    
     // Устанавливаем партнера
     gameData.partnerId = friendId;
     
     // Выбираем режим соревнования
     selectGameMode('competition');
     
-    showNotification(`🎮 Подключение к ${gameData.friends.find(f => f.id === friendId)?.name || friendId}...`);
+    const friend = gameData.friends.find(f => f.id === friendId);
+    showNotification(`📤 Приглашение на партнерство отправлено ${friend?.name || friendId}!`);
 }
 
 // Выбор режима игры
@@ -1355,7 +1542,8 @@ function savePlayerName() {
     }
     
     const player = getCurrentPlayer();
-    player.name = newName.toUpperCase();
+    // Сохраняем имя как есть, без преобразования в верхний регистр
+    player.name = newName;
     
     // Обновляем кнопку переключения если в режиме соревнования
     if (gameData.gameMode === 'competition') {
@@ -1709,9 +1897,12 @@ function renderAchievements(filter = 'all') {
 
 // Открытие модального окна для отметки достижения
 function openAchievementModal(achievementId) {
+    console.log('openAchievementModal called:', achievementId, 'gameMode:', gameData.gameMode);
+    
     // В режиме соревнования не используем это окно напрямую
     if (gameData.gameMode === 'competition') {
         // Предлагаем отправить отчет
+        console.log('Competition mode - redirecting to report modal');
         openReportModal(achievementId);
         return;
     }
@@ -1726,21 +1917,39 @@ function openAchievementModal(achievementId) {
     
     if (!achievement) {
         console.error('Achievement not found:', achievementId);
+        showNotification('Достижение не найдено!');
         return;
     }
     
     const modal = document.getElementById('achievementModal');
+    if (!modal) {
+        console.error('Achievement modal not found in DOM');
+        showNotification('Ошибка: модальное окно не найдено');
+        return;
+    }
     
-    document.getElementById('modalAchievementName').textContent = achievement.name;
-    document.getElementById('modalAchievementDesc').textContent = achievement.desc || '';
-    document.getElementById('achievementDate').value = new Date().toISOString().split('T')[0];
+    const nameEl = document.getElementById('modalAchievementName');
+    const descEl = document.getElementById('modalAchievementDesc');
+    const dateEl = document.getElementById('achievementDate');
+    
+    if (!nameEl || !descEl || !dateEl) {
+        console.error('Modal elements not found');
+        return;
+    }
+    
+    nameEl.textContent = achievement.name;
+    descEl.textContent = achievement.desc || '';
+    dateEl.value = new Date().toISOString().split('T')[0];
     modal.dataset.achievementId = achievementId;
     
     modal.classList.add('active');
+    console.log('Modal opened for achievement:', achievement.name);
 }
 
 // Начать выполнение достижения (режим соревнования)
 function startAchievement(achievementId) {
+    console.log('startAchievement called:', achievementId);
+    
     const player = getCurrentPlayer();
     
     if (!player.inProgressAchievements) {
@@ -1750,6 +1959,7 @@ function startAchievement(achievementId) {
     // Проверяем, не начато ли уже
     if (player.inProgressAchievements.find(ipa => ipa.id === achievementId)) {
         showNotification('Это достижение уже в процессе выполнения!');
+        console.log('Achievement already in progress');
         return;
     }
     
@@ -1761,8 +1971,11 @@ function startAchievement(achievementId) {
     
     if (!achievement) {
         showNotification('Достижение не найдено!');
+        console.error('Achievement not found:', achievementId);
         return;
     }
+    
+    console.log('Found achievement:', achievement.name);
     
     // Добавляем в процесс выполнения
     player.inProgressAchievements.push({
@@ -1771,42 +1984,65 @@ function startAchievement(achievementId) {
         reportSent: false
     });
     
+    console.log('Added to inProgressAchievements. Total:', player.inProgressAchievements.length);
+    
+    // Сохраняем данные
     saveGameData();
+    
+    // Обновляем интерфейс
     renderAchievements();
     
     // Показываем напоминание
-    showReminderModal(achievement);
+    setTimeout(() => {
+        showReminderModal(achievement);
+    }, 100); // Небольшая задержка для корректного отображения
+    
+    showNotification(`✅ Начато выполнение "${achievement.name}"! Не забудьте отправить отчет!`);
 }
 
 // Показать напоминание об отчете
 function showReminderModal(achievement) {
+    console.log('Showing reminder modal for:', achievement.name);
+    
+    // Удаляем существующее модальное окно если есть
+    const existingModal = document.querySelector('.reminder-modal')?.closest('.modal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
     const reminderModal = document.createElement('div');
     reminderModal.className = 'modal active';
     reminderModal.style.zIndex = '2000';
+    reminderModal.style.display = 'flex';
     reminderModal.innerHTML = `
-        <div class="modal-content reminder-modal">
+        <div class="modal-content reminder-modal" style="max-width: 500px; margin: auto;">
             <h2>⚠️ Напоминание!</h2>
             <div class="reminder-content">
                 <p><strong>Вы начали выполнение достижения:</strong></p>
-                <p class="reminder-achievement-name">${achievement.name}</p>
-                <div class="reminder-warning">
-                    <strong>⚠️ ОБЯЗАТЕЛЬНО СДЕЛАЙТЕ ОТЧЕТ СВОЕМУ ПАРТНЕРУ!</strong>
-                    <p>Только после одобрения партнером задание будет считаться выполненным.</p>
+                <p class="reminder-achievement-name" style="font-size: 18px; font-weight: bold; color: #667eea; margin: 10px 0;">${achievement.name}</p>
+                <div class="reminder-warning" style="background: #fff3cd; border: 2px solid #ffc107; border-radius: 8px; padding: 15px; margin: 15px 0;">
+                    <strong style="color: #856404;">⚠️ ОБЯЗАТЕЛЬНО СДЕЛАЙТЕ ОТЧЕТ СВОЕМУ ПАРТНЕРУ!</strong>
+                    <p style="margin-top: 10px; color: #856404;">Только после одобрения партнером задание будет считаться выполненным.</p>
                 </div>
-                <p>Не забудьте отправить фото-отчет в разделе "Отчеты"!</p>
+                <p style="margin-top: 15px;">📸 Не забудьте отправить фото или видео-отчет в разделе "Отчеты"!</p>
             </div>
-            <button class="btn-primary" onclick="this.closest('.modal').remove()">Понятно</button>
+            <div style="margin-top: 20px;">
+                <button class="btn-primary" onclick="this.closest('.modal').remove(); console.log('Reminder modal closed');">Понятно</button>
+            </div>
         </div>
     `;
     
     document.body.appendChild(reminderModal);
     
-    // Закрытие при клике вне модального окна
+    // Закрытие при клике вне модального окна (но не закрываем автоматически)
     reminderModal.addEventListener('click', (e) => {
         if (e.target === reminderModal) {
-            reminderModal.remove();
+            // Можно закрыть кликом вне, но лучше оставить только кнопку
+            // reminderModal.remove();
         }
     });
+    
+    console.log('Reminder modal added to DOM');
 }
 
 // Открыть модальное окно для отправки отчета
@@ -2223,6 +2459,13 @@ function confirmAchievement() {
         }
     }
     
+    console.log('Confirming achievement:', {
+        achievementId: achievementId,
+        achievementName: achievement.name,
+        date: date,
+        playerName: player.name
+    });
+    
     // Сохранение timestamp выполнения
     const timestamp = new Date().toISOString();
     
@@ -2278,7 +2521,13 @@ function confirmAchievement() {
     }
     player.coins += rewards.coins;
     
+    // Сохраняем данные ПЕРЕД закрытием модального окна
+    saveGameData();
+    
+    // Закрываем модальное окно
     modal.classList.remove('active');
+    
+    // Обновляем интерфейс
     renderAchievements();
     renderCombat(); // Обновляем интерфейс боя для показа накопленного урона
     updatePlayerStats(); // Обновляем статы
@@ -2289,24 +2538,23 @@ function confirmAchievement() {
         const sharedCoins = (gameData.player.coins || 0) + (gameData.player2.coins || 0);
         const sharedXP = (gameData.player.xp || 0) + (gameData.player2.xp || 0);
         
-        saveGameData(); // Сохраняем с общими данными
-        
         const critText = isCrit ? ' 💥 КРИТ!' : '';
         showNotification(`✅ Достижение "${achievement.name}" выполнено! Накоплено ${finalDamage} урона${critText} (ваш урон: ${player.accumulatedDamage}, общий с партнером: ${sharedDamage})! +${rewards.xp} опыта, +${rewards.coins} монет (общий опыт: ${sharedXP}, общие монеты: ${sharedCoins})`);
     } else {
-        saveGameData();
         const critText = isCrit ? ' 💥 КРИТ!' : '';
         showNotification(`✅ Достижение "${achievement.name}" выполнено! Накоплено ${finalDamage} урона${critText} (всего: ${player.accumulatedDamage})! +${rewards.xp} опыта, +${rewards.coins} монет`);
     }
     
-    console.log('Achievement completed:', {
+    console.log('Achievement completed successfully:', {
         achievement: achievement.name,
+        achievementId: achievementId,
         difficulty: achievement.difficulty,
         xp: rewards.xp,
         coins: rewards.coins,
         damage: finalDamage,
         totalDamage: player.accumulatedDamage,
-        isCrit: isCrit
+        isCrit: isCrit,
+        completedAchievementsCount: player.completedAchievements.length
     });
 }
 
@@ -3407,8 +3655,12 @@ function renderReports() {
     const formTitle = document.getElementById('reportFormTitle');
     const player = getCurrentPlayer();
     
-    if (!container) return;
+    if (!container) {
+        console.error('reportsList container not found');
+        return;
+    }
     
+    // Очищаем только список отчетов, но не трогаем форму (она в другом месте)
     container.innerHTML = '';
     
     // Обновляем заголовок формы
@@ -3469,9 +3721,13 @@ function renderReports() {
         return new Date(b.timestamp) - new Date(a.timestamp);
     });
     
+    // Если нет отчетов, показываем сообщение
     if (sortedReports.length === 0) {
-        container.innerHTML = '<div class="empty-reports">Пока нет отчетов. Отправьте первый отчет!</div>';
-        return;
+        const emptyMsg = document.createElement('div');
+        emptyMsg.className = 'empty-reports';
+        emptyMsg.innerHTML = '<div style="padding: 20px; text-align: center; color: #7f8c8d;">Пока нет отчетов. Отправьте первый отчет!</div>';
+        container.appendChild(emptyMsg);
+        // НЕ возвращаемся - форма должна быть видна ниже
     }
     
     sortedReports.forEach(report => {
@@ -3480,10 +3736,17 @@ function renderReports() {
         
         // В режиме соревнования определяем, от кого отчет
         // playerId === 'player1' означает свой отчет, иначе - от партнера
-        const isOwnReport = report.playerId === 'player1';
+        // Также проверяем senderPlayerId для более точной идентификации
+        const isOwnReport = (report.playerId === 'player1' && 
+                            (!report.senderPlayerId || report.senderPlayerId === gameData.playerId)) ||
+                           (report.senderPlayerId && report.senderPlayerId === gameData.playerId);
         const isCompetition = gameData.gameMode === 'competition';
         // Можем проверять только отчеты партнера (не свои)
-        const canReview = isCompetition && !isOwnReport && report.status === 'pending';
+        // Отчет от партнера: playerId === 'partner' ИЛИ senderPlayerId !== gameData.playerId
+        const isPartnerReport = isCompetition && 
+                               (report.playerId === 'partner' || 
+                                (report.senderPlayerId && report.senderPlayerId !== gameData.playerId));
+        const canReview = isCompetition && isPartnerReport && report.status === 'pending';
         
         let statusBadge = '';
         if (isCompetition) {
@@ -3505,9 +3768,15 @@ function renderReports() {
             if (isOwnReport) {
                 senderName = 'Вы';
                 senderInfo = '<span style="color: #667eea; font-weight: bold;">(Ваш отчет)</span>';
-            } else {
-                senderName = `Партнер (${gameData.partnerId || 'ID'})`;
+            } else if (isPartnerReport) {
+                // Отчет от партнера
+                const partnerName = gameData.player2?.name || `Партнер (${gameData.partnerId || 'ID'})`;
+                senderName = partnerName;
                 senderInfo = '<span style="color: #e74c3c; font-weight: bold;">(От партнера)</span>';
+            } else {
+                // Неизвестный отправитель
+                senderName = report.playerName || 'Неизвестно';
+                senderInfo = '';
             }
         }
         
@@ -3648,17 +3917,22 @@ function removePhotoPreview() {
 
 // Отправка отчета
 function sendReport() {
+    console.log('sendReport called');
     const achievementSelect = document.getElementById('reportAchievementSelect');
     const photoInput = document.getElementById('reportPhotoInput');
     const preview = document.getElementById('reportPhotoPreview');
     
     if (!achievementSelect || !achievementSelect.value) {
         showNotification('Выберите достижение!');
+        console.log('No achievement selected');
         return;
     }
     
     const achievementId = achievementSelect.value;
     const player = getCurrentPlayer();
+    
+    console.log('Achievement ID:', achievementId);
+    console.log('Game mode:', gameData.gameMode);
     
     // Находим достижение
     let achievement = gameData.achievements.find(a => a.id === achievementId);
@@ -3668,74 +3942,136 @@ function sendReport() {
     
     if (!achievement) {
         showNotification('Достижение не найдено!');
+        console.log('Achievement not found');
         return;
     }
     
-    // Получаем фото или видео
-    if (!photoInput || !photoInput.files || !photoInput.files[0]) {
-        showNotification('Пожалуйста, прикрепите фото или видео!');
+    console.log('Achievement found:', achievement.name);
+    
+    // Проверяем наличие медиа
+    const hasMedia = photoInput && photoInput.files && photoInput.files[0];
+    
+    // В режиме соревнования медиа обязательно
+    if (gameData.gameMode === 'competition' && !hasMedia) {
+        showNotification('В режиме соревнования необходимо прикрепить фото или видео!');
+        console.log('Competition mode requires media');
         return;
     }
     
-    const file = photoInput.files[0];
-    const isImage = file.type.startsWith('image/');
-    const isVideo = file.type.startsWith('video/');
-    
-    if (!isImage && !isVideo) {
-        showNotification('Пожалуйста, выберите изображение или видео!');
-        return;
-    }
-    
-    // Проверка размера
-    const maxSize = isVideo ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
-    if (file.size > maxSize) {
-        showNotification(`Файл слишком большой! Максимум ${isVideo ? '10MB' : '5MB'}.`);
-        return;
-    }
-    
-    // Для видео проверяем длительность
-    if (isVideo) {
-        const video = document.createElement('video');
-        video.preload = 'metadata';
+    // Если есть медиа, обрабатываем его
+    if (hasMedia) {
+        const file = photoInput.files[0];
+        const isImage = file.type.startsWith('image/');
+        const isVideo = file.type.startsWith('video/');
         
-        video.onloadedmetadata = function() {
-            window.URL.revokeObjectURL(video.src);
-            const duration = video.duration;
+        if (!isImage && !isVideo) {
+            showNotification('Пожалуйста, выберите изображение или видео!');
+            return;
+        }
+        
+        // Проверка размера
+        const maxSize = isVideo ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
+        if (file.size > maxSize) {
+            showNotification(`Файл слишком большой! Максимум ${isVideo ? '10MB' : '5MB'}.`);
+            return;
+        }
+        
+        // Для видео проверяем длительность
+        if (isVideo) {
+            const video = document.createElement('video');
+            video.preload = 'metadata';
             
-            if (duration > 10) {
-                showNotification('Видео слишком длинное! Максимум 10 секунд.');
-                return;
-            }
+            video.onloadedmetadata = function() {
+                window.URL.revokeObjectURL(video.src);
+                const duration = video.duration;
+                
+                if (duration > 10) {
+                    showNotification('Видео слишком длинное! Максимум 10 секунд.');
+                    // Очищаем input
+                    if (photoInput) photoInput.value = '';
+                    if (preview) preview.innerHTML = '';
+                    return;
+                }
+                
+                console.log('Video duration OK:', duration, 'seconds');
+                
+                // Читаем видео
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    console.log('Video file read successfully, size:', e.target.result.length, 'bytes');
+                    console.log('Creating report with video data');
+                    createReport(achievement, e.target.result, 'video', duration);
+                };
+                reader.onerror = function(error) {
+                    console.error('Error reading video file:', error);
+                    showNotification('Ошибка при чтении видео!');
+                    // Очищаем input
+                    if (photoInput) photoInput.value = '';
+                    if (preview) preview.innerHTML = '';
+                };
+                reader.onprogress = function(e) {
+                    if (e.lengthComputable) {
+                        const percentLoaded = Math.round((e.loaded / e.total) * 100);
+                        console.log('Video loading progress:', percentLoaded + '%');
+                    }
+                };
+                reader.readAsDataURL(file);
+            };
             
-            // Читаем видео
+            video.onerror = function(error) {
+                console.error('Error loading video metadata:', error);
+                showNotification('Ошибка при загрузке видео! Проверьте формат файла.');
+                // Очищаем input
+                if (photoInput) photoInput.value = '';
+                if (preview) preview.innerHTML = '';
+            };
+            
+            // Добавляем обработчик для случая, когда метаданные не загружаются
+            video.addEventListener('loadedmetadata', function() {
+                console.log('Video metadata loaded successfully');
+            }, { once: true });
+            
+            video.src = URL.createObjectURL(file);
+            console.log('Video source set, waiting for metadata...');
+            return; // Асинхронная обработка видео
+        } else {
+            // Читаем фото
             const reader = new FileReader();
             reader.onload = function(e) {
-                createReport(achievement, e.target.result, 'video', duration);
+                console.log('Photo loaded, creating report');
+                createReport(achievement, e.target.result, 'image');
+            };
+            reader.onerror = function() {
+                console.error('Error reading photo');
+                showNotification('Ошибка при чтении фото!');
             };
             reader.readAsDataURL(file);
-        };
-        
-        video.onerror = function() {
-            showNotification('Ошибка при загрузке видео!');
-        };
-        
-        video.src = URL.createObjectURL(file);
+            return; // Асинхронная обработка фото
+        }
     } else {
-        // Читаем фото
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            createReport(achievement, e.target.result, 'image');
-        };
-        reader.readAsDataURL(file);
+        // В одиночном режиме можно отправить отчет без медиа
+        console.log('No media, creating report without media (single mode)');
+        createReport(achievement, null, 'image');
     }
 }
 
 // Создание отчета
 function createReport(achievement, mediaData, mediaType = 'image', videoDuration = null) {
+    console.log('createReport called', {
+        achievementName: achievement.name,
+        achievementId: achievement.id,
+        mediaType: mediaType,
+        hasMedia: !!mediaData,
+        gameMode: gameData.gameMode,
+        currentReportsCount: gameData.reports ? gameData.reports.length : 0
+    });
+    
     const player = getCurrentPlayer();
     
+    // Инициализируем массив отчетов если его нет
     if (!gameData.reports) {
         gameData.reports = [];
+        console.log('Initialized reports array');
     }
     
     // В режиме соревнования проверяем, что достижение в процессе выполнения
@@ -3743,6 +4079,7 @@ function createReport(achievement, mediaData, mediaType = 'image', videoDuration
         if (!player.inProgressAchievements || 
             !player.inProgressAchievements.find(ipa => ipa.id === achievement.id)) {
             showNotification('Сначала начните выполнение достижения!');
+            console.log('Achievement not in progress');
             return;
         }
         
@@ -3759,9 +4096,15 @@ function createReport(achievement, mediaData, mediaType = 'image', videoDuration
         }
     }
     
+    // Определяем playerId для отчета
+    // В режиме соревнования: 'player1' = свой отчет, 'partner' = отчет от партнера
+    // Но так как это локальная система, все отчеты создаются с playerId = 'player1' (свой аккаунт)
+    // Партнер будет видеть отчеты с playerId = 'partner' (которые мы создадим локально для имитации)
+    const reportPlayerId = 'player1'; // Всегда свой аккаунт при создании
+    
     const report = {
         id: `report_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        playerId: 'player1', // Всегда свой аккаунт
+        playerId: reportPlayerId,
         playerName: player.name,
         achievementId: achievement.id,
         achievementName: achievement.name,
@@ -3773,14 +4116,66 @@ function createReport(achievement, mediaData, mediaType = 'image', videoDuration
         reviewedBy: null,
         rejectionReason: null,
         rejectedAt: null,
+        // Добавляем ID отправителя для идентификации в локальной системе
+        senderPlayerId: gameData.playerId, // ID игрока, который отправил отчет
+        partnerId: gameData.partnerId, // ID партнера, которому отправлен отчет
         // Для обратной совместимости
         photo: mediaType === 'image' ? mediaData : null
     };
     
+    // Добавляем отчет в массив
     gameData.reports.push(report);
-    saveGameData();
-    renderReports();
-    renderAchievements();
+    console.log('Report pushed to array. Total reports:', gameData.reports.length);
+    
+    // В режиме соревнования создаем также отчет для партнера (локально)
+    // Это позволяет партнеру видеть отчеты в своем аккаунте
+    if (gameData.gameMode === 'competition' && gameData.partnerId) {
+        // Создаем копию отчета для партнера с другим playerId
+        const partnerReport = {
+            ...report,
+            id: `partner_${report.id}`, // Уникальный ID для отчета партнера
+            playerId: 'partner', // Отчет от партнера
+            senderPlayerId: gameData.playerId, // ID отправителя (ваш ID)
+            partnerId: gameData.partnerId, // ID партнера
+            // Важно: копируем медиа данные для партнера
+            media: report.media, // Копируем видео/фото данные
+            mediaType: report.mediaType, // Копируем тип медиа
+            videoDuration: report.videoDuration, // Копируем длительность видео
+            photo: report.photo, // Для обратной совместимости
+            // Партнер видит этот отчет как от вас
+        };
+        
+        console.log('Creating partner report:', {
+            id: partnerReport.id,
+            mediaType: partnerReport.mediaType,
+            hasMedia: !!partnerReport.media,
+            videoDuration: partnerReport.videoDuration
+        });
+        
+        // Проверяем, нет ли уже такого отчета
+        const existingPartnerReport = gameData.reports.find(r => 
+            r.id === partnerReport.id || 
+            (r.achievementId === partnerReport.achievementId && 
+             r.senderPlayerId === partnerReport.senderPlayerId &&
+             r.status === 'pending')
+        );
+        
+        if (!existingPartnerReport) {
+            gameData.reports.push(partnerReport);
+            console.log('Partner report created successfully. Total reports:', gameData.reports.length);
+        } else {
+            console.log('Partner report already exists, skipping');
+        }
+    }
+    
+    // Сохраняем данные СРАЗУ после добавления отчета
+    try {
+        saveGameData();
+        console.log('Game data saved after report creation');
+    } catch (e) {
+        console.error('Error saving game data:', e);
+        showNotification('Ошибка при сохранении отчета!');
+    }
     
     // Очищаем форму
     const achievementSelect = document.getElementById('reportAchievementSelect');
@@ -3790,11 +4185,25 @@ function createReport(achievement, mediaData, mediaType = 'image', videoDuration
     if (photoInput) photoInput.value = '';
     if (preview) preview.innerHTML = '';
     
+    // Обновляем интерфейс
+    renderReports();
+    renderAchievements();
+    
     if (gameData.gameMode === 'competition') {
         showNotification('📤 Отчет отправлен партнеру на проверку! Партнер увидит его в разделе "Отчеты"');
     } else {
         showNotification('📁 Отчет добавлен в архив!');
     }
+    
+    console.log('Report created successfully:', {
+        id: report.id,
+        achievementName: report.achievementName,
+        mediaType: report.mediaType,
+        hasMedia: !!report.media,
+        status: report.status,
+        reportsCount: gameData.reports.length,
+        timestamp: report.timestamp
+    });
 }
 
 // Одобрение отчета
@@ -3803,7 +4212,11 @@ function approveReport(reportId) {
     if (!report) return;
     
     // Проверяем, что это отчет партнера (не свой)
-    if (report.playerId === 'player1') {
+    const isOwnReport = (report.playerId === 'player1' && 
+                        (!report.senderPlayerId || report.senderPlayerId === gameData.playerId)) ||
+                       (report.senderPlayerId && report.senderPlayerId === gameData.playerId);
+    
+    if (isOwnReport) {
         showNotification('Нельзя одобрить свой собственный отчет!');
         return;
     }
@@ -3905,7 +4318,11 @@ function confirmRejectReport(reportId) {
     if (!report) return;
     
     // Проверяем, что это отчет партнера (не свой)
-    if (report.playerId === 'player1') {
+    const isOwnReport = (report.playerId === 'player1' && 
+                        (!report.senderPlayerId || report.senderPlayerId === gameData.playerId)) ||
+                       (report.senderPlayerId && report.senderPlayerId === gameData.playerId);
+    
+    if (isOwnReport) {
         showNotification('Нельзя отклонить свой собственный отчет!');
         const rejectModal = document.querySelector('.reject-modal')?.closest('.modal');
         if (rejectModal) {
@@ -4386,6 +4803,8 @@ function unequipItem(slot) {
 window.attackEnemy = attackEnemy;
 window.startCombat = startCombat;
 window.openAchievementModal = openAchievementModal;
+window.showReminderModal = showReminderModal;
+window.cancelAchievement = cancelAchievement;
 window.deleteCustomAchievement = deleteCustomAchievement;
 window.buyItem = buyItem;
 window.fightBoss = fightBoss;
@@ -4487,6 +4906,7 @@ function updateGameModeDisplay() {
     
     // Обновляем информацию о партнере
     updatePartnerInfo();
+    renderPartnerInvitations();
 }
 
 // Обновление информации о партнере в личном кабинете
